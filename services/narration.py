@@ -13,7 +13,6 @@ def build_prompt(db: Session, player_input: str) -> str:
         .limit(10)
         .all()
     )[::-1]  # reverse to chronological order
-    history = reversed(history)  # chronological order
 
     chat = ""
     for entry in history:
