@@ -177,3 +177,5 @@ cython_debug/
 # Archived version
 
 archived/
+
+database.db
