@@ -1,24 +1,28 @@
+from __future__ import annotations
 import uuid
-from sqlalchemy import DateTime, String, func
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
-
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import String, DateTime, Integer, JSON
 from app.db.base import Base
-
+from app.utils.enums import CampaignMode
 
 class Campaign(Base):
     __tablename__ = "campaigns"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name: Mapped[str] = mapped_column(String(200), default="New Campaign")
-    user_id: Mapped[str] = mapped_column(String(200), default="local-dev")
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(200), index=True)
 
-    seed: Mapped[int] = mapped_column(default=0)
-    world_time: Mapped[int] = mapped_column(default=0)  # ticks or minutes, your choice
-    tone_vector: Mapped[dict] = mapped_column(JSONB, default=dict)
+    mode: Mapped[str] = mapped_column(String(32), default=CampaignMode.explore.value)
+    narration_style: Mapped[str] = mapped_column(String(64), default="basic_fantasy")
 
-    created_at: Mapped[datetime] = mapped_column(
-    DateTime(timezone=True),
-    server_default=func.now(),
-)
+    tone_profile: Mapped[dict] = mapped_column(JSON, default=dict)
+    reskin_profile: Mapped[dict] = mapped_column(JSON, default=dict)
+    setting_tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+
+    calendar_name: Mapped[str] = mapped_column(String(128), default="Gregorian")
+    start_datetime: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    current_datetime: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    turn_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

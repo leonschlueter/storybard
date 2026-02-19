@@ -1,0 +1,1 @@
+This folder is for Alembic migrations. Generate with: alembic revision --autogenerate -m "init"
