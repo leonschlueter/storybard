@@ -72,3 +72,22 @@ class OllamaClient:
             raise OllamaError(str(e)) from e
         finally:
             LLM_SECONDS.labels(role=output_model.__name__).observe(time.perf_counter() - t0)
+
+    def embed(self, *, model: str, text: str) -> list[float]:
+        """Returns an embedding vector using Ollama /api/embeddings."""
+        payload = {"model": model, "prompt": text}
+        t0 = time.perf_counter()
+        try:
+            r = self._client.post(f"{self.base_url}/api/embeddings", json=payload)
+            r.raise_for_status()
+            out = r.json()
+            vec = out.get("embedding")
+            if not isinstance(vec, list):
+                raise OllamaError("No embedding returned")
+            LLM_CALL_COUNTER.labels(role="embedding", status="ok").inc()
+            return [float(x) for x in vec]
+        except Exception as e:
+            LLM_CALL_COUNTER.labels(role="embedding", status="error").inc()
+            raise OllamaError(str(e)) from e
+        finally:
+            LLM_SECONDS.labels(role="embedding").observe(time.perf_counter() - t0)

@@ -19,6 +19,7 @@ class CharacterSheet(Base):
     proficiencies: Mapped[dict] = mapped_column(JSON, default=dict)   # skills, saves, weapons, armor
     max_hp: Mapped[int] = mapped_column(Integer, default=12)
     current_hp: Mapped[int] = mapped_column(Integer, default=12)
+    armor_class: Mapped[int] = mapped_column(Integer, default=10)
     speed: Mapped[int] = mapped_column(Integer, default=30)
 
     gold: Mapped[int] = mapped_column(Integer, default=10)

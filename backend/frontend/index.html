@@ -3,827 +3,100 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Storybard Dev Console</title>
-  <style>
-    :root{
-      --bg:#0b0f17; --panel:#101827; --panel2:#0f1624; --muted:#9aa4b2; --text:#e5e7eb;
-      --accent:#7c3aed; --accent2:#22c55e; --danger:#ef4444; --warn:#f59e0b; --line:#1f2a44;
-      --chip:#18233a; --chip2:#1c2b47; --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-    }
-    * { box-sizing:border-box; }
-    body{
-      margin:0; font-family: var(--sans); background: radial-gradient(1200px 700px at 30% -20%, #1b2a55 0%, transparent 50%),
-      radial-gradient(900px 600px at 90% 0%, #2a164f 0%, transparent 55%),
-      var(--bg);
-      color: var(--text);
-    }
-    header{
-      padding:18px 18px 10px;
-      border-bottom: 1px solid var(--line);
-      background: rgba(16, 24, 39, 0.7);
-      backdrop-filter: blur(8px);
-      position: sticky; top:0; z-index: 10;
-    }
-    .row{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-    .title{
-      display:flex; align-items:center; gap:10px; margin-bottom:10px;
-    }
-    .badge{
-      font-family: var(--mono);
-      font-size: 12px;
-      padding: 4px 8px;
-      border:1px solid var(--line);
-      border-radius:999px;
-      background: rgba(124, 58, 237, 0.12);
-      color: #c4b5fd;
-    }
-    h1{ font-size:16px; margin:0; letter-spacing:0.2px; }
-    .container{ padding: 16px 18px 40px; }
-    .grid{
-      display:grid;
-      grid-template-columns: 360px 1fr;
-      gap: 14px;
-      align-items:start;
-    }
-    @media (max-width: 1100px){
-      .grid{ grid-template-columns: 1fr; }
-    }
-    .card{
-      background: linear-gradient(180deg, rgba(16,24,39,.9), rgba(15,22,36,.9));
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      padding: 14px;
-      box-shadow: 0 10px 30px rgba(0,0,0,.25);
-    }
-    .card h2{
-      font-size: 13px;
-      letter-spacing: .12em;
-      text-transform: uppercase;
-      margin: 0 0 10px;
-      color: #cbd5e1;
-    }
-    .field{ display:flex; flex-direction:column; gap:6px; margin-bottom:10px; }
-    label{ font-size:12px; color: var(--muted); }
-    input, textarea, select, button{
-      font-family: var(--sans);
-      border-radius: 12px;
-      border: 1px solid var(--line);
-      background: rgba(8, 12, 20, 0.7);
-      color: var(--text);
-      padding: 10px 10px;
-      outline: none;
-    }
-    input:focus, textarea:focus, select:focus{
-      border-color: rgba(124, 58, 237, .6);
-      box-shadow: 0 0 0 3px rgba(124,58,237,.18);
-    }
-    textarea{ min-height: 86px; resize: vertical; font-family: var(--sans); }
-    button{
-      cursor:pointer;
-      background: linear-gradient(180deg, rgba(124,58,237,.9), rgba(99,102,241,.8));
-      border: 1px solid rgba(124,58,237,.65);
-      font-weight: 600;
-    }
-    button.secondary{
-      background: rgba(17,24,39,.8);
-      border-color: var(--line);
-      font-weight: 600;
-    }
-    button.danger{
-      background: rgba(239,68,68,.16);
-      border-color: rgba(239,68,68,.4);
-      color: #fecaca;
-    }
-    .mini{
-      font-size: 12px;
-      padding: 8px 10px;
-      border-radius: 12px;
-    }
-    .status{
-      font-family: var(--mono);
-      font-size: 12px;
-      color: var(--muted);
-      display:flex; gap:10px; flex-wrap:wrap;
-    }
-    .pill{
-      padding: 4px 8px;
-      border-radius: 999px;
-      background: rgba(148,163,184,.08);
-      border: 1px solid var(--line);
-    }
-    .pill.ok{ border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.10); color: #bbf7d0; }
-    .pill.warn{ border-color: rgba(245,158,11,.35); background: rgba(245,158,11,.10); color: #fde68a; }
-    .pill.bad{ border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.10); color: #fecaca; }
-    .split{
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 14px;
-    }
-    @media (max-width: 1100px){
-      .split{ grid-template-columns: 1fr; }
-    }
-    .list{
-      display:flex;
-      flex-direction:column;
-      gap:10px;
-    }
-    .item{
-      border: 1px solid var(--line);
-      background: rgba(8,12,20,0.45);
-      border-radius: 14px;
-      padding: 12px;
-    }
-    .itemHead{
-      display:flex; justify-content:space-between; align-items:flex-start; gap:12px;
-    }
-    .itemTitle{
-      font-weight: 700; font-size: 14px; margin:0;
-    }
-    .meta{
-      font-family: var(--mono);
-      font-size: 11px;
-      color: var(--muted);
-      display:flex;
-      flex-wrap:wrap;
-      gap:8px;
-      margin-top: 6px;
-    }
-    .chip{
-      background: rgba(148,163,184,.08);
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      padding: 3px 8px;
-    }
-    .itemBody{
-      margin-top: 10px;
-      color: #d1d5db;
-      font-size: 13px;
-      line-height: 1.35rem;
-      white-space: pre-wrap;
-    }
-    .mono{
-      font-family: var(--mono);
-      font-size: 12px;
-      color: #cbd5e1;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-    .toolbar{
-      display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:space-between;
-      margin-bottom: 10px;
-    }
-    .toolbar .left, .toolbar .right { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-    .divider{ height:1px; background: var(--line); margin: 10px 0; }
-    .hint{ font-size: 12px; color: var(--muted); }
-    .toast{
-      position: fixed; right: 18px; bottom: 18px;
-      background: rgba(15,22,36,0.95);
-      border: 1px solid var(--line);
-      padding: 10px 12px;
-      border-radius: 12px;
-      box-shadow: 0 12px 30px rgba(0,0,0,.35);
-      font-size: 13px;
-      max-width: 520px;
-      display:none;
-      white-space: pre-wrap;
-    }
-    .toast.show{ display:block; }
-    .kbd{
-      font-family: var(--mono);
-      font-size: 11px;
-      border: 1px solid var(--line);
-      background: rgba(148,163,184,.08);
-      border-radius: 8px;
-      padding: 2px 6px;
-      color: #cbd5e1;
-    }
-  </style>
+  <title>Storybard Prototype</title>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-<header>
-  <div class="title">
-    <h1>Storybard Dev Console</h1>
-    <span class="badge">Local API UI</span>
-  </div>
-
-  <div class="row">
-    <div class="status" id="statusLine">
-      <span class="pill" id="apiPill">API: (not checked)</span>
-      <span class="pill" id="campaignPill">Campaign: (none)</span>
-      <span class="pill" id="actorPill">Actor: (none)</span>
-      <span class="pill" id="modePill">Mode: (n/a)</span>
-      <span class="pill" id="timePill">Time: (n/a)</span>
+  <header class="topbar">
+    <div class="brand">Storybard</div>
+    <div class="top-actions">
+      <button id="btnSeed" class="btn">Seed Campaign</button>
+      <button id="btnLoad" class="btn btn-ghost">Load</button>
     </div>
+  </header>
 
-    <div style="flex:1"></div>
-
-    <div class="row">
-      <input id="apiBase" style="width: 270px" value="http://127.0.0.1:8000" />
-      <button class="secondary mini" id="checkApiBtn">Check API</button>
-      <button class="danger mini" id="clearStateBtn" title="Clears local storage for this UI">Clear UI State</button>
-    </div>
-  </div>
-</header>
-
-<div class="container">
-  <div class="grid">
-    <!-- LEFT: Control panel -->
-    <div class="card">
-      <h2>Campaign</h2>
-
-      <div class="field">
-        <label>Seed campaign (LLM worldgen)</label>
-        <input id="seedName" value="Dev Campaign" />
-      </div>
-
-      <div class="field">
-        <label>Narration style</label>
-        <select id="seedStyle">
-          <option value="basic_fantasy">basic_fantasy</option>
-          <option value="randy_random">randy_random</option>
-          <option value="grim_dark">grim_dark</option>
-          <option value="cinematic">cinematic</option>
-        </select>
-      </div>
-
-      <div class="field">
-        <label>Themes (comma-separated)</label>
-        <input id="seedThemes" value="mystery, frontier" />
-      </div>
-
-      <div class="field">
-        <label>Constraints (comma-separated)</label>
-        <input id="seedConstraints" value="medium world, 3-5 threads, playable starting town" />
-      </div>
-
-      <div class="row">
-        <button id="seedBtn">Seed new campaign</button>
-        <button class="secondary" id="refreshBtn">Refresh views</button>
-      </div>
-
-      <div class="divider"></div>
-
-      <h2>Play</h2>
-
-      <div class="field">
-        <label>Player message <span class="hint">(Enter to send, Shift+Enter for newline)</span></label>
-        <textarea id="turnText" placeholder="I walk to the tavern and ask the barkeep what's new."></textarea>
-      </div>
-
-      <div class="row">
-        <button id="sendTurnBtn">Send turn</button>
-        <button class="secondary" id="loadLastNarrationBtn" title="Loads last narration into the output panel">Show last narration</button>
-      </div>
-
-      <div class="divider"></div>
-
-      <h2>Pending Roll</h2>
-      <div class="field">
-        <label>Pending roll ID</label>
-        <input id="pendingId" placeholder="(auto-filled)" />
-      </div>
-
-      <div class="field">
-        <label>Raw d20 result (physical die)</label>
-        <input id="pendingD20" type="number" min="1" max="20" placeholder="e.g. 14" />
-      </div>
-
-      <div class="row">
-        <button id="submitRollBtn">Submit roll</button>
-        <button class="secondary" id="clearPendingBtn">Clear pending</button>
-      </div>
-
-      <div class="divider"></div>
-
-      <h2>Quick Links</h2>
-      <div class="row">
-        <a class="chip" id="docsLink" href="http://127.0.0.1:8000/docs" target="_blank" rel="noreferrer">OpenAPI /docs</a>
-        <a class="chip" id="metricsLink" href="http://127.0.0.1:8000/metrics" target="_blank" rel="noreferrer">/metrics</a>
-      </div>
-
-      <div class="divider"></div>
-
-      <p class="hint">
-        Tips: hit <span class="kbd">Refresh</span> to pull latest threads/blocks/events.
-        Editing a context block updates it in Postgres immediately.
-      </p>
-    </div>
-
-    <!-- RIGHT: Data views -->
-    <div class="card">
-      <div class="toolbar">
-        <div class="left">
-          <h2 style="margin:0">World State</h2>
+  <main class="layout">
+    <section class="panel left">
+      <div class="card">
+        <h2>Campaign</h2>
+        <div class="grid">
+          <label>
+            Name
+            <input id="campName" placeholder="Dev Campaign" />
+          </label>
+          <label>
+            Genre
+            <input id="campGenre" placeholder="fantasy" value="fantasy" />
+          </label>
+          <label>
+            Campaign ID
+            <input id="campaignId" placeholder="..." />
+          </label>
+          <label>
+            Actor ID
+            <input id="actorId" placeholder="..." />
+          </label>
         </div>
-        <div class="right">
-          <input id="blockSearch" placeholder="Search context blocks…" style="width: 260px" />
-          <select id="blockTypeFilter" style="width: 180px">
-            <option value="">All types</option>
-            <option value="campaign_summary">campaign_summary</option>
-            <option value="thread">thread</option>
-            <option value="location">location</option>
-            <option value="npc">npc</option>
-            <option value="memory">memory</option>
-            <option value="lore_hint">lore_hint</option>
-          </select>
-          <select id="blockSort" style="width: 170px">
-            <option value="priority_desc">Sort: priority ↓</option>
-            <option value="priority_asc">Sort: priority ↑</option>
-            <option value="type">Sort: type</option>
-            <option value="title">Sort: title</option>
-          </select>
-        </div>
+        <p class="muted">Tip: click <b>Seed Campaign</b> to create a demo world and get an opening scene narration.</p>
       </div>
 
-      <div class="split">
-        <!-- Context blocks -->
-        <div class="card" style="padding: 12px; background: rgba(8,12,20,.35);">
-          <h2>Context Blocks</h2>
-          <div class="list" id="blocksList"></div>
+      <div class="card">
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-tab="thoughts">Thoughts</button>
+          <button class="tab" data-tab="scene">Scene</button>
+          <button class="tab" data-tab="context">Context Blocks</button>
         </div>
 
-        <!-- Right column: narration + threads + events -->
-        <div class="list">
-          <div class="card" style="padding: 12px; background: rgba(8,12,20,.35);">
-            <h2>Last Narration</h2>
-            <div class="mono" id="lastNarration">(none yet)</div>
-          </div>
-
-          <div class="card" style="padding: 12px; background: rgba(8,12,20,.35);">
-            <h2>Threads</h2>
-            <div class="list" id="threadsList"></div>
-          </div>
-
-          <div class="card" style="padding: 12px; background: rgba(8,12,20,.35);">
-            <h2>Recent Events</h2>
-            <div class="list" id="eventsList"></div>
-          </div>
+        <div class="tabpane" id="tab-thoughts">
+          <h3>Introspection</h3>
+          <pre id="thoughtsIntro" class="pre"></pre>
+          <h3>Pacing</h3>
+          <pre id="thoughtsPacing" class="pre"></pre>
+          <h3>Plan</h3>
+          <pre id="thoughtsPlan" class="pre"></pre>
         </div>
-      </div>
 
-    </div>
-  </div>
-</div>
-
-<div class="toast" id="toast"></div>
-
-<script>
-  // ---------- State ----------
-  const $ = (id) => document.getElementById(id);
-
-  const storageKey = "storybardDevConsole.v1";
-  const state = loadState();
-
-  function loadState(){
-    try{
-      const raw = localStorage.getItem(storageKey);
-      return raw ? JSON.parse(raw) : {};
-    }catch(e){
-      return {};
-    }
-  }
-  function saveState(){
-    localStorage.setItem(storageKey, JSON.stringify(state));
-  }
-
-  function apiBase(){
-    return ($("apiBase").value || "http://127.0.0.1:8000").replace(/\/+$/,"");
-  }
-
-  // ---------- UI helpers ----------
-  function toast(msg, type="ok"){
-    const t = $("toast");
-    t.textContent = msg;
-    t.classList.add("show");
-    t.style.borderColor = type==="ok" ? "rgba(34,197,94,.35)" : (type==="warn" ? "rgba(245,158,11,.35)" : "rgba(239,68,68,.35)");
-    setTimeout(() => t.classList.remove("show"), 3600);
-  }
-
-  function setPill(el, text, kind=""){
-    el.textContent = text;
-    el.classList.remove("ok","warn","bad");
-    if(kind) el.classList.add(kind);
-  }
-
-  function updateHeader(){
-    setPill($("apiPill"), `API: ${apiBase()}`, "ok");
-    setPill($("campaignPill"), state.campaignId ? `Campaign: ${state.campaignId}` : "Campaign: (none)", state.campaignId ? "ok" : "");
-    setPill($("actorPill"), state.actorId ? `Actor: ${state.actorId}` : "Actor: (none)", state.actorId ? "ok" : "");
-    setPill($("modePill"), state.mode ? `Mode: ${state.mode}` : "Mode: (n/a)", state.mode ? "ok" : "");
-    setPill($("timePill"), state.campaignTime ? `Time: ${state.campaignTime}` : "Time: (n/a)", state.campaignTime ? "ok" : "");
-    $("docsLink").href = `${apiBase()}/docs`;
-    $("metricsLink").href = `${apiBase()}/metrics`;
-  }
-
-  // ---------- API ----------
-  async function apiGet(path){
-    const res = await fetch(`${apiBase()}${path}`);
-    if(!res.ok) throw new Error(`GET ${path} failed (${res.status})`);
-    return res.json();
-  }
-  async function apiPost(path, body){
-    const res = await fetch(`${apiBase()}${path}`,{
-      method:"POST",
-      headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify(body)
-    });
-    if(!res.ok) throw new Error(`POST ${path} failed (${res.status})`);
-    return res.json();
-  }
-  async function apiPut(path, body){
-    const res = await fetch(`${apiBase()}${path}`,{
-      method:"PUT",
-      headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify(body)
-    });
-    if(!res.ok) throw new Error(`PUT ${path} failed (${res.status})`);
-    return res.json();
-  }
-
-  // ---------- Rendering ----------
-  function escapeHtml(s){
-    return (s ?? "").toString()
-      .replaceAll("&","&amp;").replaceAll("<","&lt;")
-      .replaceAll(">","&gt;").replaceAll('"',"&quot;")
-      .replaceAll("'","&#039;");
-  }
-
-  function renderBlocks(blocks){
-    const q = ($("blockSearch").value || "").toLowerCase().trim();
-    const typeFilter = $("blockTypeFilter").value || "";
-    const sort = $("blockSort").value;
-
-    let items = blocks.slice();
-
-    if(typeFilter){
-      items = items.filter(b => (b.type || "") === typeFilter);
-    }
-
-    if(q){
-      items = items.filter(b => {
-        const hay = `${b.type} ${b.title} ${b.summary||""} ${b.full_text||""}`.toLowerCase();
-        return hay.includes(q);
-      });
-    }
-
-    if(sort === "priority_desc") items.sort((a,b)=>(b.priority??0)-(a.priority??0));
-    if(sort === "priority_asc") items.sort((a,b)=>(a.priority??0)-(b.priority??0));
-    if(sort === "type") items.sort((a,b)=>(a.type||"").localeCompare(b.type||""));
-    if(sort === "title") items.sort((a,b)=>(a.title||"").localeCompare(b.title||""));
-
-    const root = $("blocksList");
-    root.innerHTML = "";
-
-    if(!items.length){
-      root.innerHTML = `<div class="hint">No context blocks found.</div>`;
-      return;
-    }
-
-    for(const b of items){
-      const el = document.createElement("div");
-      el.className = "item";
-      el.innerHTML = `
-        <div class="itemHead">
-          <div>
-            <div class="itemTitle">${escapeHtml(b.title || "(untitled)")}</div>
-            <div class="meta">
-              <span class="chip">${escapeHtml(b.type)}</span>
-              <span class="chip">prio=${(b.priority ?? 0).toFixed ? (b.priority ?? 0).toFixed(2) : (b.priority ?? 0)}</span>
-              <span class="chip">ttl=${b.ttl_turns === null || b.ttl_turns === undefined ? "∞" : b.ttl_turns}</span>
-              <span class="chip">${escapeHtml(b.scope_type || "global")}:${escapeHtml(b.scope_id || "-")}</span>
-              <span class="chip">${b.is_active ? "active" : "inactive"}</span>
-            </div>
-          </div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <button class="secondary mini" data-action="toggleEdit">Edit</button>
-            <button class="danger mini" data-action="deactivate">Deactivate</button>
-          </div>
+        <div class="tabpane hidden" id="tab-scene">
+          <h3 id="sceneTitle">(no scene loaded)</h3>
+          <p id="sceneSummary" class="muted"></p>
+          <h4>Nearby locations</h4>
+          <div id="nearby" class="list"></div>
+          <h4>NPCs present</h4>
+          <div id="npcsHere" class="list"></div>
         </div>
-        <div class="itemBody">${escapeHtml(b.summary || "")}</div>
 
-        <div class="divider" style="display:none"></div>
-        <div class="edit" style="display:none; margin-top:10px;">
-          <div class="field">
-            <label>Title</label>
-            <input data-field="title" value="${escapeHtml(b.title || "")}">
-          </div>
-          <div class="field">
-            <label>Summary</label>
-            <textarea data-field="summary">${escapeHtml(b.summary || "")}</textarea>
-          </div>
-          <div class="field">
-            <label>Full text</label>
-            <textarea data-field="full_text" placeholder="(optional)">${escapeHtml(b.full_text || "")}</textarea>
-          </div>
+        <div class="tabpane hidden" id="tab-context">
           <div class="row">
-            <div class="field" style="flex:1; min-width:140px;">
-              <label>Priority</label>
-              <input data-field="priority" type="number" step="0.05" value="${escapeHtml(b.priority ?? 0.5)}">
-            </div>
-            <div class="field" style="flex:1; min-width:140px;">
-              <label>TTL turns (blank = ∞)</label>
-              <input data-field="ttl_turns" type="number" step="1" value="${b.ttl_turns ?? ""}">
-            </div>
-            <div class="field" style="flex:1; min-width:140px;">
-              <label>Active</label>
-              <select data-field="is_active">
-                <option value="true" ${b.is_active ? "selected":""}>true</option>
-                <option value="false" ${!b.is_active ? "selected":""}>false</option>
-              </select>
-            </div>
+            <input id="ctxSearch" placeholder="Search lore blocks..." />
+            <button id="btnRefresh" class="btn btn-ghost">Refresh</button>
           </div>
-          <div class="field">
-            <label>Structured (JSON)</label>
-            <textarea data-field="structured" class="mono" placeholder='{"any":"json"}'>${escapeHtml(JSON.stringify(b.structured || {}, null, 2))}</textarea>
-          </div>
-          <div class="row">
-            <button class="mini" data-action="save">Save</button>
-            <button class="secondary mini" data-action="cancel">Cancel</button>
-            <span class="hint" style="margin-left:auto; font-family:var(--mono);">id: ${escapeHtml(b.id)}</span>
-          </div>
+          <div id="contextBlocks" class="list"></div>
         </div>
-      `;
+      </div>
+    </section>
 
-      // wire events
-      const editWrap = el.querySelector(".edit");
-      const divider = el.querySelector(".divider");
-      el.querySelector('[data-action="toggleEdit"]').onclick = () => {
-        const open = editWrap.style.display !== "none";
-        editWrap.style.display = open ? "none" : "block";
-        divider.style.display = open ? "none" : "block";
-      };
-      el.querySelector('[data-action="cancel"]').onclick = () => {
-        editWrap.style.display = "none";
-        divider.style.display = "none";
-      };
-      el.querySelector('[data-action="deactivate"]').onclick = async () => {
-        if(!confirm(`Deactivate "${b.title}"?`)) return;
-        await apiPut(`/v1/context-blocks/${b.id}`, { is_active: false });
-        toast("Context block deactivated.");
-        await refreshAll();
-      };
-      el.querySelector('[data-action="save"]').onclick = async () => {
-        const patch = {};
-        const title = el.querySelector('[data-field="title"]').value;
-        const summary = el.querySelector('[data-field="summary"]').value;
-        const full_text = el.querySelector('[data-field="full_text"]').value;
-        const priority = el.querySelector('[data-field="priority"]').value;
-        const ttl = el.querySelector('[data-field="ttl_turns"]').value;
-        const is_active = el.querySelector('[data-field="is_active"]').value;
-        const structuredRaw = el.querySelector('[data-field="structured"]').value;
+    <section class="panel right">
+      <div class="card">
+        <h2>Transcript</h2>
+        <div id="events" class="events"></div>
+      </div>
 
-        patch.title = title;
-        patch.summary = summary;
-        patch.full_text = full_text || null;
-        patch.priority = priority !== "" ? Number(priority) : null;
-        patch.ttl_turns = ttl !== "" ? Number(ttl) : null;
-        patch.is_active = is_active === "true";
-
-        try{
-          patch.structured = structuredRaw ? JSON.parse(structuredRaw) : {};
-        }catch(e){
-          toast("Structured JSON is invalid.", "bad");
-          return;
-        }
-
-        await apiPut(`/v1/context-blocks/${b.id}`, patch);
-        toast("Saved context block.");
-        await refreshAll();
-      };
-
-      root.appendChild(el);
-    }
-  }
-
-  function renderThreads(threads){
-    const root = $("threadsList");
-    root.innerHTML = "";
-    if(!threads?.length){
-      root.innerHTML = `<div class="hint">No threads yet.</div>`;
-      return;
-    }
-    for(const t of threads){
-      const el = document.createElement("div");
-      el.className = "item";
-      el.innerHTML = `
-        <div class="itemHead">
-          <div>
-            <div class="itemTitle">${escapeHtml(t.title)}</div>
-            <div class="meta">
-              <span class="chip">status=${escapeHtml(t.status)}</span>
-              <span class="chip">prio=${(t.priority ?? 0).toFixed ? (t.priority ?? 0).toFixed(2) : (t.priority ?? 0)}</span>
-              <span class="chip mono">id=${escapeHtml(t.id)}</span>
-            </div>
-          </div>
+      <div class="card">
+        <h2>Send an action</h2>
+        <textarea id="actionText" rows="4" placeholder="Type an action..."></textarea>
+        <div class="row end">
+          <button id="btnSend" class="btn">Send</button>
         </div>
-        <div class="itemBody">${escapeHtml(t.summary || "")}</div>
-      `;
-      root.appendChild(el);
-    }
-  }
+        <p class="muted">The engine will decide whether a roll is required; otherwise it will update the world and narrate.</p>
+      </div>
 
-  function renderEvents(events){
-    const root = $("eventsList");
-    root.innerHTML = "";
-    if(!events?.length){
-      root.innerHTML = `<div class="hint">No events yet.</div>`;
-      return;
-    }
-    for(const e of events.slice(-12).reverse()){
-      const el = document.createElement("div");
-      el.className = "item";
-      const check = e.check && Object.keys(e.check).length ? JSON.stringify(e.check) : "";
-      el.innerHTML = `
-        <div class="itemHead">
-          <div>
-            <div class="itemTitle">${escapeHtml(e.campaign_timestamp)} <span class="chip">${escapeHtml(e.mode)}</span></div>
-            <div class="meta">
-              <span class="chip">event</span>
-            </div>
-          </div>
-        </div>
-        <div class="itemBody"><b>Player:</b> ${escapeHtml(e.action_text || "")}</div>
-        ${e.narration ? `<div class="itemBody"><b>Narrator:</b> ${escapeHtml(e.narration)}</div>` : ""}
-        ${check ? `<div class="itemBody"><b>Check:</b> <span class="mono">${escapeHtml(check)}</span></div>` : ""}
-      `;
-      root.appendChild(el);
-    }
-  }
+      <div class="card">
+        <h2>Status</h2>
+        <div id="status" class="muted">Idle</div>
+      </div>
+    </section>
+  </main>
 
-  // ---------- Actions ----------
-  async function checkApi(){
-    try{
-      const res = await apiGet("/health");
-      setPill($("apiPill"), `API: ${apiBase()} (ok)`, "ok");
-      toast("API reachable.");
-      return true;
-    }catch(e){
-      setPill($("apiPill"), `API: ${apiBase()} (down)`, "bad");
-      toast(`API check failed: ${e.message}`, "bad");
-      return false;
-    }
-  }
-
-  async function seedCampaign(){
-    const themes = ($("seedThemes").value || "").split(",").map(s=>s.trim()).filter(Boolean);
-    const constraints = ($("seedConstraints").value || "").split(",").map(s=>s.trim()).filter(Boolean);
-
-    const body = {
-      name: $("seedName").value || "Dev Campaign",
-      narration_style: $("seedStyle").value || "basic_fantasy",
-      genre: "fantasy",
-      themes,
-      magic_level: "medium",
-      constraints,
-    };
-
-    const out = await apiPost("/v1/dev/seed", body);
-    state.campaignId = out.campaign_id;
-    state.actorId = out.player_actor_id;
-    state.startNodeId = out.start_node_id;
-    state.pendingRollId = null;
-    saveState();
-    toast("Seeded campaign.");
-    await refreshAll();
-  }
-
-  async function refreshAll(){
-    updateHeader();
-    if(!state.campaignId) return;
-
-    const [camp, blocks, threads, events] = await Promise.all([
-      apiGet(`/v1/campaigns/${state.campaignId}`),
-      apiGet(`/v1/campaigns/${state.campaignId}/context-blocks?active_only=false`),
-      apiGet(`/v1/campaigns/${state.campaignId}/threads`),
-      apiGet(`/v1/campaigns/${state.campaignId}/events?limit=60`),
-    ]);
-
-    state.mode = camp.mode;
-    state.campaignTime = camp.current_datetime;
-    saveState();
-
-    renderBlocks(blocks || []);
-    renderThreads(threads || []);
-    renderEvents(events || []);
-
-    updateHeader();
-  }
-
-  async function sendTurn(){
-    if(!state.actorId){
-      toast("Seed a campaign first.", "warn");
-      return;
-    }
-
-    const text = $("turnText").value.trim();
-    if(!text){
-      toast("Write a player message first.", "warn");
-      return;
-    }
-
-    const out = await apiPost(`/v1/turns/${state.actorId}`, { text });
-    state.mode = out.mode;
-    state.campaignTime = out.campaign_time;
-
-    if(out.pending_roll?.id){
-      state.pendingRollId = out.pending_roll.id;
-      $("pendingId").value = state.pendingRollId;
-      toast("Roll required. Enter your physical d20.");
-    }else{
-      state.pendingRollId = null;
-      $("pendingId").value = "";
-    }
-
-    if(out.narration){
-      state.lastNarration = out.narration;
-      $("lastNarration").textContent = out.narration;
-    }
-
-    saveState();
-    updateHeader();
-    await refreshAll();
-  }
-
-  async function submitRoll(){
-    const id = ($("pendingId").value || "").trim() || state.pendingRollId;
-    const d20 = Number(($("pendingD20").value || "").trim());
-
-    if(!id){
-      toast("No pending roll id.", "warn");
-      return;
-    }
-    if(!d20 || d20 < 1 || d20 > 20){
-      toast("Enter a valid d20 (1-20).", "warn");
-      return;
-    }
-
-    const out = await apiPost(`/v1/rolls/${id}`, { d20 });
-    state.mode = out.mode;
-    state.campaignTime = out.campaign_time;
-    state.pendingRollId = null;
-    $("pendingId").value = "";
-    $("pendingD20").value = "";
-
-    if(out.narration){
-      state.lastNarration = out.narration;
-      $("lastNarration").textContent = out.narration;
-    }
-
-    saveState();
-    toast("Roll submitted.");
-    await refreshAll();
-  }
-
-  function clearUiState(){
-    localStorage.removeItem(storageKey);
-    location.reload();
-  }
-
-  // ---------- Wire up ----------
-  $("checkApiBtn").onclick = checkApi;
-  $("seedBtn").onclick = async () => { if(await checkApi()) await seedCampaign(); };
-  $("refreshBtn").onclick = async () => { if(await checkApi()) await refreshAll(); };
-  $("sendTurnBtn").onclick = async () => { if(await checkApi()) await sendTurn(); };
-  $("submitRollBtn").onclick = async () => { if(await checkApi()) await submitRoll(); };
-  $("clearPendingBtn").onclick = () => {
-    state.pendingRollId = null;
-    $("pendingId").value = "";
-    $("pendingD20").value = "";
-    saveState();
-    toast("Cleared pending roll.");
-  };
-  $("clearStateBtn").onclick = clearUiState;
-  $("loadLastNarrationBtn").onclick = () => {
-    $("lastNarration").textContent = state.lastNarration || "(none yet)";
-    toast("Loaded last narration from UI state.");
-  };
-
-  $("blockSearch").addEventListener("input", async () => { if(state.campaignId) await refreshAll(); });
-  $("blockTypeFilter").addEventListener("change", async () => { if(state.campaignId) await refreshAll(); });
-  $("blockSort").addEventListener("change", async () => { if(state.campaignId) await refreshAll(); });
-
-  // Enter to send turn, Shift+Enter for newline
-  $("turnText").addEventListener("keydown", (e) => {
-    if(e.key === "Enter" && !e.shiftKey){
-      e.preventDefault();
-      $("sendTurnBtn").click();
-    }
-  });
-
-  // Restore saved state
-  (function init(){
-    $("apiBase").value = state.apiBase || $("apiBase").value;
-    if(state.pendingRollId) $("pendingId").value = state.pendingRollId;
-    if(state.lastNarration) $("lastNarration").textContent = state.lastNarration;
-
-    updateHeader();
-    checkApi().then(ok => {
-      if(ok && state.campaignId){
-        refreshAll().catch(err => toast(err.message, "bad"));
-      }
-    }).catch(()=>{});
-  })();
-</script>
+  <script src="app.js"></script>
 </body>
 </html>

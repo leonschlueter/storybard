@@ -10,22 +10,40 @@ from app.services.llm.schemas import (
     CheckAdviceOut,
     KnowledgeSelectionOut,
     GMPlannerOut,
+    WorldUpdateOut,
     NarratorOut,
     MemoryOut,
     ThreadAdvanceOut,
     CampaignSeedOut,
+    LocationDetailOut,
+    NPCSheetOut,
 )
 
 from app.services.llm.prompts.intent import build_intent_prompt
 from app.services.llm.prompts.check import build_check_prompt
 from app.services.llm.prompts.knowledge import build_knowledge_prompt
 from app.services.llm.prompts.gm_planner import build_gm_planner_prompt
+from app.services.llm.prompts.world_update import build_world_update_prompt
 from app.services.llm.prompts.narrator import build_narrator_prompt
 from app.services.llm.prompts.memory import build_memory_prompt
 from app.services.llm.prompts.thread import build_thread_prompt
 from app.services.llm.prompts.seeder import build_seeder_prompt
 
+from app.services.llm.prompts.location_detail import build_location_detail_prompt
+from app.services.llm.prompts.npc_sheet import build_npc_sheet_prompt
+
 log = structlog.get_logger()
+
+_singleton: LLMRoles | None = None
+
+
+def get_llm() -> "LLMRoles":
+
+    """Process-wide singleton used by API endpoints that need embeddings."""
+    global _singleton
+    if _singleton is None:
+        _singleton = LLMRoles(OllamaClient(base_url=settings.OLLAMA_BASE_URL))
+    return _singleton
 
 MAX_LOG_LEN = 8000  # avoid terminal flooding
 
@@ -172,6 +190,24 @@ class LLMRoles:
 
         return out
 
+    # ---------- World Update (ops) ----------
+    def world_update(self, *, payload: dict) -> WorldUpdateOut:
+        system, user = build_world_update_prompt(payload=payload)
+
+        log_llm_input("world_update", system, user)
+
+        t0 = time.perf_counter()
+        out = self.client.structured_chat(
+            model=settings.model_for("world"),
+            system=system,
+            user=user,
+            output_model=WorldUpdateOut,
+            temperature=0.2,
+        )
+        log_llm_latency("world_update", (time.perf_counter() - t0) * 1000)
+        log_llm_output("world_update", out)
+        return out
+
     # ---------- Narrator ----------
     def narrate(self, *, payload: dict) -> NarratorOut:
         system, user = build_narrator_prompt(payload=payload)
@@ -246,4 +282,36 @@ class LLMRoles:
         log_llm_latency("seeder", (time.perf_counter() - t0) * 1000)
         log_llm_output("seeder", out)
 
+        return out
+
+    # ---------- Location Detail ----------
+    def write_location(self, *, payload: dict) -> LocationDetailOut:
+        system, user = build_location_detail_prompt(payload=payload)
+        log_llm_input("location_detail", system, user)
+        t0 = time.perf_counter()
+        out = self.client.structured_chat(
+            model=settings.model_for("location"),
+            system=system,
+            user=user,
+            output_model=LocationDetailOut,
+            temperature=0.6,
+        )
+        log_llm_latency("location_detail", (time.perf_counter() - t0) * 1000)
+        log_llm_output("location_detail", out)
+        return out
+
+    # ---------- NPC Sheet ----------
+    def write_npc(self, *, payload: dict) -> NPCSheetOut:
+        system, user = build_npc_sheet_prompt(payload=payload)
+        log_llm_input("npc_sheet", system, user)
+        t0 = time.perf_counter()
+        out = self.client.structured_chat(
+            model=settings.model_for("npc"),
+            system=system,
+            user=user,
+            output_model=NPCSheetOut,
+            temperature=0.7,
+        )
+        log_llm_latency("npc_sheet", (time.perf_counter() - t0) * 1000)
+        log_llm_output("npc_sheet", out)
         return out

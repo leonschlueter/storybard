@@ -14,6 +14,7 @@ class SeedResponse(BaseModel):
     campaign_id: str
     player_actor_id: str
     start_node_id: str
+    scene_id: str | None = None
 
 class TurnRequest(BaseModel):
     text: str

@@ -5,40 +5,54 @@ def build_narrator_prompt(*, payload: dict) -> tuple[str, str]:
         "You are the NARRATOR for a tabletop RPG campaign. "
         "You produce coherent, grounded narration that respects mechanics and world canon provided. "
         "You do NOT invent new canon entities beyond the provided context (unless explicitly allowed in payload). "
-        "All context is visible to the player in this dev build."
+        "You must follow the GM DIRECTOR THOUGHTS for pacing and plan, but do NOT show those thoughts to the player. "
     )
 
-    user = f"""NARRATION STYLE:
+    user = f"""# Narration Task
+
+You are writing the next **Narrator** message for the player.
+
+## Style
 {payload.get("narration_style")}
 
---- GENERAL CAMPAIGN INFO ---
+## Campaign
+```json
 {json.dumps(payload.get("campaign_info"), ensure_ascii=False)}
+```
 
---- CAMPAIGN SUMMARY ---
-{payload.get("campaign_summary")}
-
---- ACTIVE THREADS ---
-{json.dumps(payload.get("threads"), ensure_ascii=False)}
-
---- MECHANICS SNAPSHOT (IMPORTANT) ---
+## Mechanics Snapshot
+```json
 {json.dumps(payload.get("mechanics_snapshot"), ensure_ascii=False)}
+```
 
---- CONTEXT BLOCKS ---
+## Current Scene (authoritative)
+{payload.get("scene_text")}
+
+## Recent Transcript (last ~10k chars)
+{payload.get("transcript_text")}
+
+## GM Director Thoughts (hidden from player)
+**Introspection:** {payload.get("gm_thoughts", {}).get("introspection")}
+
+**Pacing:** {payload.get("gm_thoughts", {}).get("pacing")}
+
+**Plan:** {payload.get("gm_thoughts", {}).get("plan")}
+
+## Ephemeral Context Cards (TTL)
 {payload.get("context_blocks_text")}
 
---- LORE PAGES ---
-{payload.get("lore_pages_text")}
-
---- RECENT HISTORY (last few turns) ---
-{payload.get("recent_history_text")}
-
---- PLAYER MESSAGE ---
+## Player Message
 {payload.get("player_text")}
 
---- CHECK RESULT (if any) ---
+## Check Result
+```json
 {json.dumps(payload.get("check_result") or {}, ensure_ascii=False)}
+```
 
-Write 120-220 words unless the situation requires a shorter response.
-Return vivid but playable narration. Offer 2-4 actionable options implicitly (not as a list unless appropriate).
+### Output Rules
+- Be **more verbose** and concrete than usual.
+- Include a quick **scene overview** (who is here, what’s happening) when helpful.
+- Only request a roll when it is truly uncertain and meaningful.
+- Write **380–650 words** by default.
 """
     return system, user

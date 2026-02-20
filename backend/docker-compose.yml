@@ -1,7 +1,7 @@
 services:
 
   db:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     container_name: storybard_db
     restart: unless-stopped
     environment:
@@ -31,11 +31,33 @@ services:
     image: ollama/ollama:latest
     container_name: storybard_ollama
     restart: unless-stopped
-    command: serve
+
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "
+      ollama serve &
+      sleep 5 &&
+      ollama pull mistral &&
+      ollama pull nomic-embed-text &&
+      wait
+      "
+
     ports:
       - "11434:11434"
+
     volumes:
       - ollama_models:/root/.ollama
+
+    environment:
+      - OLLAMA_KEEP_ALIVE=30m
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   # 🔥 ONE CONTAINER OTEL STACK
   otel:

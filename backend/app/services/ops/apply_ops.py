@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from app.models.world import WorldNode
 from app.models.actor import Actor
+from app.models.actor_profile import ActorProfile
 from app.models.lore import LorePage
 from app.models.context import ContextBlock
 from app.models.thread import StoryThread
@@ -46,6 +47,24 @@ def apply_ops(db: Session, *, campaign_id: str, ops: list[dict]) -> dict:
             )
             db.add(a)
             db.flush()
+
+            prof = data.get("profile") or {}
+            if prof:
+                p = ActorProfile(
+                    actor_id=a.id,
+                    pronouns=prof.get("pronouns"),
+                    voice=prof.get("voice"),
+                    faction=prof.get("faction"),
+                    appearance=prof.get("appearance"),
+                    personality=prof.get("personality"),
+                    mannerisms=prof.get("mannerisms"),
+                    backstory=prof.get("backstory"),
+                    goals=prof.get("goals"),
+                    secrets=prof.get("secrets"),
+                    extra=prof.get("extra", {}),
+                )
+                db.add(p)
+
             created["actors"].append(a.id)
 
         elif op_type == "move_actor":
@@ -66,6 +85,9 @@ def apply_ops(db: Session, *, campaign_id: str, ops: list[dict]) -> dict:
             created["lore_pages"].append(p.id)
 
         elif op_type == "create_context_block":
+            ttl = data.get("ttl_turns")
+            if ttl is None and data.get("type") not in ("instruction", "campaign_summary"):
+                ttl = 5
             b = ContextBlock(
                 campaign_id=campaign_id,
                 type=data["type"],
@@ -78,7 +100,7 @@ def apply_ops(db: Session, *, campaign_id: str, ops: list[dict]) -> dict:
                 full_text=data.get("full_text"),
                 structured=data.get("structured", {}),
                 priority=float(data.get("priority", 0.5)),
-                ttl_turns=data.get("ttl_turns"),
+                ttl_turns=ttl,
                 is_active=bool(data.get("is_active", True)),
             )
             db.add(b)
@@ -88,6 +110,9 @@ def apply_ops(db: Session, *, campaign_id: str, ops: list[dict]) -> dict:
         elif op_type == "update_context_block":
             b = db.execute(select(ContextBlock).where(ContextBlock.id == data["id"])).scalar_one_or_none()
             if b and b.campaign_id == campaign_id:
+                # compatibility: some older prompts used `text` instead of `summary`
+                if "text" in data and data.get("summary") is None:
+                    data["summary"] = data.get("text")
                 for k in ["title","summary","full_text","structured","priority","ttl_turns","is_active","visibility","hardness","scope_type","scope_id","type"]:
                     if k in data and data[k] is not None:
                         setattr(b, k, data[k])

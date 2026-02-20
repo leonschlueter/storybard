@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 from app.models.world import WorldNode
 from app.models.actor import Actor
+from app.models.actor_profile import ActorProfile
 from app.models.lore import LorePage
 from app.models.context import ContextBlock
 from app.models.thread import StoryThread
@@ -14,11 +15,37 @@ def fetch_selected(db: Session, selection: dict) -> dict:
 
     if selection.get("world_nodes"):
         xs = db.execute(select(WorldNode).where(WorldNode.id.in_(selection["world_nodes"]))).scalars().all()
-        out["world_nodes"] = [{"id": x.id, "name": x.name, "description": x.description, "x": x.x, "y": x.y} for x in xs]
+        out["world_nodes"] = [{"id": x.id, "name": x.name, "description": x.description, "description_long": x.description_long, "region": x.region, "biome": x.biome, "danger_level": x.danger_level, "x": x.x, "y": x.y} for x in xs]
 
     if selection.get("actors"):
         xs = db.execute(select(Actor).where(Actor.id.in_(selection["actors"]))).scalars().all()
-        out["actors"] = [{"id": x.id, "name": x.name, "kind": x.kind, "bio": x.bio, "current_node_id": x.current_node_id} for x in xs]
+        ids = [x.id for x in xs]
+        profs = db.execute(select(ActorProfile).where(ActorProfile.actor_id.in_(ids))).scalars().all() if ids else []
+        prof_map = {p.actor_id: p for p in profs}
+        out["actors"] = []
+        for x in xs:
+            p = prof_map.get(x.id)
+            out["actors"].append(
+                {
+                    "id": x.id,
+                    "name": x.name,
+                    "kind": x.kind,
+                    "bio": x.bio,
+                    "current_node_id": x.current_node_id,
+                    "profile": {
+                        "pronouns": p.pronouns if p else None,
+                        "voice": p.voice if p else None,
+                        "faction": p.faction if p else None,
+                        "appearance": p.appearance if p else None,
+                        "personality": p.personality if p else None,
+                        "mannerisms": p.mannerisms if p else None,
+                        "backstory": p.backstory if p else None,
+                        "goals": p.goals if p else None,
+                        "secrets": p.secrets if p else None,
+                        "extra": p.extra if p else {},
+                    },
+                }
+            )
 
     if selection.get("lore_pages"):
         xs = db.execute(select(LorePage).where(LorePage.id.in_(selection["lore_pages"]))).scalars().all()

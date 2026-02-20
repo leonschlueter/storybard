@@ -1,9 +1,10 @@
 from __future__ import annotations
 import uuid
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import String, Text, Integer, Float, JSON, Boolean
+from sqlalchemy import String, Text, Integer, Float, JSON, Boolean, DateTime
 
 from app.db.base import Base
+from datetime import datetime
 
 class ContextBlock(Base):
     __tablename__ = "context_blocks"
@@ -26,4 +27,7 @@ class ContextBlock(Base):
 
     priority: Mapped[float] = mapped_column(Float, default=0.5)
     ttl_turns: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

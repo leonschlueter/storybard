@@ -1,7 +1,7 @@
 from __future__ import annotations
 import uuid
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import String, Text, Float
+from sqlalchemy import String, Text, Float, Integer
 from app.db.base import Base
 
 class WorldNode(Base):
@@ -12,6 +12,11 @@ class WorldNode(Base):
 
     name: Mapped[str] = mapped_column(String(200), index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description_long: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    region: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    biome: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    danger_level: Mapped[int] = mapped_column(Integer, default=1)  # 1..10
 
     x: Mapped[float | None] = mapped_column(Float, nullable=True)
     y: Mapped[float | None] = mapped_column(Float, nullable=True)

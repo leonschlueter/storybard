@@ -1,20 +1,36 @@
+# --- Core API ---
 fastapi==0.115.6
 uvicorn[standard]==0.30.6
+
+# --- Data & Validation ---
 pydantic==2.8.2
 pydantic-settings==2.4.0
+
+# --- Database ---
+pgvector
 SQLAlchemy==2.0.36
 psycopg2-binary==2.9.9
 alembic==1.14.0
+
+# --- HTTP Client ---
 httpx==0.27.2
 
+# --- Logging ---
 structlog==24.4.0
 python-json-logger==2.0.7
 
+# --- Metrics ---
 prometheus-client==0.21.0
 
-opentelemetry-api==1.26.0
-opentelemetry-sdk==1.26.0
-opentelemetry-exporter-otlp==1.26.0
-opentelemetry-instrumentation-fastapi==0.47b0
-opentelemetry-instrumentation-httpx==0.47b0
-opentelemetry-instrumentation-sqlalchemy==0.47b0
+# --- OpenTelemetry (STABLE SET) ---
+opentelemetry-api==1.27.0
+opentelemetry-sdk==1.27.0
+opentelemetry-exporter-otlp==1.27.0
+
+opentelemetry-instrumentation==0.48b0
+opentelemetry-instrumentation-fastapi==0.48b0
+opentelemetry-instrumentation-httpx==0.48b0
+opentelemetry-instrumentation-sqlalchemy==0.48b0
+
+# --- Python 3.12 compatibility ---
+setuptools<81
