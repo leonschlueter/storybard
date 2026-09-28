@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Storybard DB",
+      "Group": "Servers",
+      "Host": "db",
+      "Port": 5432,
+      "MaintenanceDB": "storybard",
+      "Username": "postgres",
+      "SSLMode": "prefer",
+      "Comment": "docker-compose db service"
+    }
+  }
+}

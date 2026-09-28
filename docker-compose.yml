@@ -1,0 +1,72 @@
+services:
+
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: storybard_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: storybard
+    ports:
+      - "5432:5432"
+    volumes:
+      - storybard_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    build: ./server
+    container_name: storybard_server
+    restart: unless-stopped
+    env_file:
+      - ./server/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/storybard
+      LM_STUDIO_BASE_URL: http://host.docker.internal:1234/v1
+    ports:
+      - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./web
+      target: dev
+    container_name: storybard_web
+    restart: unless-stopped
+    environment:
+      VITE_API_BASE: http://localhost:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./web:/app
+      - /app/node_modules
+    depends_on:
+      - server
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: storybard_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@gmail.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      - db
+
+volumes:
+  storybard_pg:
+  pgadmin_data:
