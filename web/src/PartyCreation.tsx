@@ -7,6 +7,7 @@ import {
   finalizeCharacter,
   getCharacterOptions,
 } from "./lib/api";
+import { Dices, Shield, Sparkles, Users } from "lucide-react";
 import { Button } from "./components/Button";
 import { Card } from "./components/Card";
 
@@ -109,15 +110,21 @@ export default function PartyCreation() {
   }
 
   const overBudget = method === "point_buy" && pointBuySpent > POINT_BUY_POOL;
+  // Guards a real failure observed live: a "generate" mode seed can under-produce (e.g.
+  // ancestries with zero classes) — without this, Confirm silently submitted class_key=""
+  // and the player hit a confusing 404 instead of a clear in-context explanation.
+  const missingOptions = options.ancestry_defs.length === 0 || options.class_defs.length === 0;
 
   return (
     <div className="min-h-screen flex justify-center px-6 py-10">
       <div className="max-w-2xl w-full flex flex-col gap-4">
-        <h1 className="font-serif text-3xl text-ink-100 mb-2">Create Your Character</h1>
+        <h1 className="font-serif text-3xl text-ink-100 mb-2 flex items-center gap-2.5">
+          <Users className="w-6 h-6 text-ember-400" /> Create Your Character
+        </h1>
 
         {error && <pre className="text-ember-300 text-xs whitespace-pre-wrap">{error}</pre>}
 
-        <Card>
+        <Card variant="elevated">
           <h2 className="font-serif text-lg text-ink-100 mb-3">Ancestry</h2>
           <div className="flex flex-col gap-1.5">
             {options.ancestry_defs.map((a) => (
@@ -137,7 +144,7 @@ export default function PartyCreation() {
           </div>
         </Card>
 
-        <Card>
+        <Card variant="elevated">
           <h2 className="font-serif text-lg text-ink-100 mb-3">Class</h2>
           <div className="flex flex-col gap-1.5">
             {options.class_defs.map((c) => (
@@ -157,7 +164,7 @@ export default function PartyCreation() {
           </div>
         </Card>
 
-        <Card>
+        <Card variant="elevated">
           <h2 className="font-serif text-lg text-ink-100 mb-3">Ability scores</h2>
           <div className="flex flex-col gap-2 mb-3">
             <label className="flex items-center gap-2 text-sm text-ink-200">
@@ -178,7 +185,7 @@ export default function PartyCreation() {
           </div>
 
           {method === "roll" && (
-            <Button variant="secondary" onClick={handleRoll} className="mb-3">
+            <Button variant="secondary" onClick={handleRoll} className="mb-3" icon={<Dices className="w-4 h-4" />}>
               Roll
             </Button>
           )}
@@ -210,13 +217,25 @@ export default function PartyCreation() {
           </div>
         </Card>
 
-        <Card className="text-sm text-ink-300">
+        <Card variant="elevated" className="text-sm text-ink-300 flex items-center gap-2">
+          <Shield className="w-4 h-4 text-teal-400 shrink-0" />
           Max HP: <span className="text-ink-100">{previewMaxHp ?? "—"}</span> · Armor Class:{" "}
           <span className="text-ink-100">{previewAc}</span> · Speed:{" "}
           <span className="text-ink-100">{selectedAncestry?.speed ?? "—"}</span>
         </Card>
 
-        <Button onClick={handleConfirm} disabled={busy || overBudget}>
+        {missingOptions && (
+          <Card className="text-sm text-crimson-300 border-crimson-500/40">
+            This campaign is missing {options.ancestry_defs.length === 0 ? "ancestries" : "classes"} —
+            it looks like seeding didn't fully generate. Re-seed the campaign before creating a character.
+          </Card>
+        )}
+
+        <Button
+          onClick={handleConfirm}
+          disabled={busy || overBudget || missingOptions}
+          icon={<Sparkles className="w-4 h-4" />}
+        >
           {busy ? "Creating..." : "Confirm Character"}
         </Button>
       </div>

@@ -26,7 +26,12 @@ class TurnRun(Base):
     actor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
 
     action_text: Mapped[str] = mapped_column(String(4000))
-    status: Mapped[str] = mapped_column(String(32), default="running")  # running | paused | completed
+    # running | paused | completed | abandoned — "abandoned" (api/turns.py's abandon
+    # route) is the explicit, non-silent way out of a turn stuck mid-review (e.g. the
+    # player typed a new action without resolving the pending step first) — without it,
+    # create_turn's in-flight guard would permanently block the actor on a turn nobody
+    # intends to finish. Never set implicitly; only a direct player action sets it.
+    status: Mapped[str] = mapped_column(String(32), default="running")
     final_narration: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

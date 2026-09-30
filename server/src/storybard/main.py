@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from storybard.api import campaigns, explore, party, turns, ws
 from storybard.chain.graph import build_graph
@@ -20,17 +21,43 @@ async def lifespan(app: FastAPI):
     configure_logging()
 
     llm_client = LMStudioClient()
-    # The compiled graph + its InMemorySaver checkpointer must be a true singleton for the
-    # app's lifetime: resuming a paused turn later (a separate HTTP request, possibly
-    # minutes later while a human reviews a step) needs to hit the *same* checkpointer
-    # instance that holds that turn's in-memory state.
-    app.state.chain_runtime = build_graph(llm=llm_client, model=settings.LLM_MODEL_DEFAULT)
-    app.state.llm_client = llm_client
 
-    log.info("startup", model=settings.LLM_MODEL_DEFAULT, lm_studio_base_url=settings.LM_STUDIO_BASE_URL)
-    yield
+    # AsyncPostgresSaver, not InMemorySaver: a paused turn's in-progress chain state used
+    # to live only in the server process's own memory — a restart mid-review orphaned it
+    # at the LangGraph level even though its ChainStep/TurnRun rows in Postgres were
+    # unaffected (confirmed live: resuming after a restart raised a raw KeyError, a 500,
+    # not a clean recoverable error). langgraph-checkpoint-postgres was already a
+    # dependency; this was a known, tracked gap, not a final architectural choice.
+    # AsyncPostgresSaver wants a plain psycopg conn string, not SQLAlchemy's "+psycopg"
+    # dialect-qualified URL — same Postgres, a different driver-string convention.
+    pg_conn_string = settings.DATABASE_URL.replace("postgresql+psycopg://", "postgresql://")
+    async with AsyncPostgresSaver.from_conn_string(pg_conn_string) as checkpointer:
+        # Idempotent — creates LangGraph's own checkpoint tables on first run, a no-op
+        # after. Separate from this project's own Alembic-managed schema: LangGraph owns
+        # and migrates these tables itself, not app/alembic/versions/.
+        await checkpointer.setup()
 
-    await llm_client.aclose()
+        # The compiled graph + its checkpointer must be a true singleton for the app's
+        # lifetime: resuming a paused turn later (a separate HTTP request, possibly
+        # minutes later while a human reviews a step) needs to hit the *same* checkpointer.
+        app.state.chain_runtime = build_graph(
+            llm=llm_client,
+            model=settings.LLM_MODEL_DEFAULT,
+            creative_model=settings.LLM_MODEL_CREATIVE,
+            checkpointer=checkpointer,
+        )
+        app.state.llm_client = llm_client
+
+        log.info(
+            "startup",
+            model=settings.LLM_MODEL_DEFAULT,
+            creative_model=settings.LLM_MODEL_CREATIVE,
+            lm_studio_base_url=settings.LM_STUDIO_BASE_URL,
+            checkpointer="AsyncPostgresSaver",
+        )
+        yield
+
+        await llm_client.aclose()
 
 
 def create_app() -> FastAPI:

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { type SeedInput, type SeedProposal, commitSeed, pitchSeed, proposeSeed } from "./lib/api";
+import { Sparkles, Wand2 } from "lucide-react";
 import { Button } from "./components/Button";
 import { Card } from "./components/Card";
 
@@ -18,6 +19,27 @@ const DEFAULT_INPUT: SeedInput = {
   narrator_style_description: "Plain, direct, spoken-style.",
   player_actor_name: "Arin",
   must_include: [],
+  seed_npc_count: 3,
+  seed_hook_count: 3,
+  seed_npc_relationships: true,
+  seed_rumor_count: 3,
+  seed_location_depth: 2,
+  seed_calendar_from_pitch: true,
+  seed_always_faction: true,
+  seed_session_zero: true,
+  seed_starting_inventory: true,
+  seed_starting_inventory_count: 3,
+  seed_planted_reveal: true,
+  safety_tools: "",
+  personal_stakes: "",
+  calendar_context: "",
+};
+
+// Which ops each reroll button replaces (feature #9's partial reroll) — see handleReroll.
+const REROLL_OP_TYPES: Record<string, string[]> = {
+  "NPCs & relationships": ["create_actor"],
+  "Hooks & rumors": ["propose_hook"],
+  Locations: ["create_world_node"],
 };
 
 const FIELD = "block text-sm text-ink-300 mb-1";
@@ -82,6 +104,37 @@ export default function SeedWizard() {
     }
   }
 
+  async function handleReroll(category: string) {
+    const opTypes = REROLL_OP_TYPES[category];
+    setBusy(true);
+    setError(null);
+    try {
+      const input: SeedInput = {
+        ...form,
+        inspiration_tags: inspirationTagsText.split(",").map((t) => t.trim()).filter(Boolean),
+        must_include: mustIncludeText.split("\n").map((t) => t.trim()).filter(Boolean),
+      };
+      const fresh = await proposeSeed(input);
+      const current = JSON.parse(proposalDraft) as SeedProposal;
+      // Never replace the root world node (its identity is fixed once review starts) —
+      // only child locations count as "Locations" for the reroll.
+      const isRoot = (op: Record<string, unknown>) => op.op === "create_world_node" && !op.parent_node_id;
+      const matches = (op: Record<string, unknown>) => opTypes.includes(op.op as string) && !isRoot(op);
+      const freshMatching = fresh.ops.filter(matches);
+      const keptOthers = current.ops.filter((op) => !matches(op));
+      const merged: SeedProposal = {
+        ...current,
+        ops: [...keptOthers, ...freshMatching],
+        planted_reveal: opTypes.includes("propose_hook") ? fresh.planted_reveal : current.planted_reveal,
+      };
+      setProposalDraft(JSON.stringify(merged, null, 2));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleConfirm() {
     setBusy(true);
     setError(null);
@@ -104,12 +157,14 @@ export default function SeedWizard() {
   return (
     <div className="min-h-screen flex justify-center px-6 py-10">
       <div className="max-w-2xl w-full">
-        <h1 className="font-serif text-3xl text-ink-100 mb-6">New Campaign</h1>
+        <h1 className="font-serif text-3xl text-ink-100 mb-6 flex items-center gap-2.5">
+          <Sparkles className="w-6 h-6 text-ember-400" /> New Campaign
+        </h1>
 
         {error && <pre className="text-ember-300 text-xs mb-4 whitespace-pre-wrap">{error}</pre>}
 
         {step === "setup" ? (
-          <Card>
+          <Card variant="elevated">
             <div className="flex gap-2 mb-5">
               <Button
                 variant={setupTab === "describe" ? "primary" : "secondary"}
@@ -137,7 +192,11 @@ export default function SeedWizard() {
                     placeholder="A grim nautical horror campaign about a cursed whaling ship."
                   />
                 </label>
-                <Button onClick={handlePitch} disabled={busy || !pitch.trim()}>
+                <Button
+                  onClick={handlePitch}
+                  disabled={busy || !pitch.trim()}
+                  icon={<Wand2 className="w-4 h-4" />}
+                >
                   {busy ? "Generating..." : "Generate inputs"}
                 </Button>
                 <p className="text-xs text-ink-500">
@@ -230,17 +289,129 @@ export default function SeedWizard() {
                 />
               </label>
 
-              <Button onClick={handleGenerate} disabled={busy}>
+              <fieldset className="border border-ink-700 rounded-lg p-3">
+                <legend className={FIELD}>Seeding options</legend>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <label>
+                    <span className="text-xs text-ink-400">NPCs</span>
+                    <input
+                      type="number" min={0} max={10} className={INPUT}
+                      value={form.seed_npc_count}
+                      onChange={(e) => updateField("seed_npc_count", Number(e.target.value))}
+                    />
+                  </label>
+                  <label>
+                    <span className="text-xs text-ink-400">Hooks</span>
+                    <input
+                      type="number" min={0} max={10} className={INPUT}
+                      value={form.seed_hook_count}
+                      onChange={(e) => updateField("seed_hook_count", Number(e.target.value))}
+                    />
+                  </label>
+                  <label>
+                    <span className="text-xs text-ink-400">Rumors</span>
+                    <input
+                      type="number" min={0} max={10} className={INPUT}
+                      value={form.seed_rumor_count}
+                      onChange={(e) => updateField("seed_rumor_count", Number(e.target.value))}
+                    />
+                  </label>
+                  <label>
+                    <span className="text-xs text-ink-400">Starting items</span>
+                    <input
+                      type="number" min={0} max={10} className={INPUT}
+                      value={form.seed_starting_inventory_count}
+                      onChange={(e) => updateField("seed_starting_inventory_count", Number(e.target.value))}
+                    />
+                  </label>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {(
+                    [
+                      ["seed_npc_relationships", "NPCs reference each other (rivalries, debts, alliances)"],
+                      ["seed_always_faction", "Always seed a background faction"],
+                      ["seed_planted_reveal", "Seed a hidden GM-only twist for later"],
+                      ["seed_calendar_from_pitch", "Set a starting-calendar flavor"],
+                      ["seed_starting_inventory", "Give the player starting inventory"],
+                      ["seed_session_zero", "Ask for session-zero content below"],
+                    ] as [keyof SeedInput, string][]
+                  ).map(([key, label]) => (
+                    <label key={key} className="flex items-center gap-2 text-sm text-ink-200">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(form[key])}
+                        onChange={(e) => updateField(key, e.target.checked as SeedInput[typeof key])}
+                        className="accent-ember-500"
+                      />
+                      {label}
+                    </label>
+                  ))}
+                  <label className="flex items-center gap-2 text-sm text-ink-200">
+                    <span className="text-xs text-ink-400 shrink-0">Child locations</span>
+                    <input
+                      type="range" min={1} max={2}
+                      value={form.seed_location_depth}
+                      onChange={(e) => updateField("seed_location_depth", Number(e.target.value))}
+                    />
+                    <span className="text-xs text-ink-500">{form.seed_location_depth >= 2 ? "on" : "off"}</span>
+                  </label>
+                </div>
+              </fieldset>
+
+              {form.seed_session_zero && (
+                <>
+                  <label>
+                    <span className={FIELD}>Safety tools (content lines/veils, table agreements)</span>
+                    <textarea
+                      className={INPUT}
+                      rows={2}
+                      value={form.safety_tools}
+                      onChange={(e) => updateField("safety_tools", e.target.value)}
+                      placeholder="Lines and veils apply. Check in if anything's too much."
+                    />
+                  </label>
+                  <label>
+                    <span className={FIELD}>Why does your character care?</span>
+                    <textarea
+                      className={INPUT}
+                      rows={2}
+                      value={form.personal_stakes}
+                      onChange={(e) => updateField("personal_stakes", e.target.value)}
+                      placeholder="Your sister went missing here three years ago."
+                    />
+                  </label>
+                </>
+              )}
+
+              <Button onClick={handleGenerate} disabled={busy} icon={<Wand2 className="w-4 h-4" />}>
                 {busy ? "Generating..." : "Generate"}
               </Button>
+              {busy && (
+                <p className="text-xs text-ink-500">
+                  This runs on a local model and takes real time — narrative content alone
+                  has taken up to ~3 minutes in testing.
+                  {form.races_classes_mode === "generate" &&
+                    " With custom races/classes, expect closer to 5 minutes: two full generation passes run back to back."}
+                  {" "}Don't close this tab; a slow response isn't a stuck one.
+                </p>
+              )}
             </div>
           </Card>
         ) : (
-          <Card>
-            <h2 className="font-serif text-xl text-ink-100 mb-2">Review &amp; generate</h2>
+          <Card variant="elevated">
+            <h2 className="font-serif text-xl text-ink-100 mb-2 flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-ember-400" /> Review &amp; generate
+            </h2>
             <p className="text-sm text-ink-400 mb-3">
               Everything below will be created when you confirm. Edit the JSON directly if you want to change anything before committing.
             </p>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {Object.keys(REROLL_OP_TYPES).map((category) => (
+                <Button key={category} variant="secondary" onClick={() => handleReroll(category)} disabled={busy}>
+                  Reroll {category}
+                </Button>
+              ))}
+            </div>
             <textarea
               className={`${INPUT} font-mono`}
               rows={22}

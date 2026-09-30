@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes } from "react";
+import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 type Variant = "primary" | "secondary" | "ghost";
 
@@ -13,13 +13,18 @@ const VARIANT_CLASSES: Record<Variant, string> = {
 
 export function Button({
   variant = "primary",
+  icon,
   className = "",
+  children,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; icon?: ReactNode }) {
   return (
     <button
-      className={`px-4 py-2 rounded-lg text-sm transition-colors disabled:cursor-not-allowed cursor-pointer ${VARIANT_CLASSES[variant]} ${className}`}
+      className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm transition-colors disabled:cursor-not-allowed cursor-pointer ${VARIANT_CLASSES[variant]} ${className}`}
       {...props}
-    />
+    >
+      {icon}
+      {children}
+    </button>
   );
 }

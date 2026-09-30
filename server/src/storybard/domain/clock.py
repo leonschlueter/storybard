@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import JSON, ForeignKey, Integer, Interval, String
+from sqlalchemy import ForeignKey, Integer, Interval, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,7 +36,8 @@ class Clock(Base):
     # placeholder from Phase 2B. See spec.md "Clock" / "What a tick actually is, now."
     real_time_per_segment: Mapped[timedelta | None] = mapped_column(Interval, nullable=True)
 
-    # One of the typed ops from chain/ops.py, applied when segments_filled reaches
-    # segments_total — consequences resolve through the same typed vocabulary as
-    # everything else, never a free-text field.
-    consequence_op: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # No consequence_op field here (removed — see migration): it was defined and read by
+    # _tick_clock but nothing ever set it, reachable only via direct DB manipulation. The
+    # established pattern instead (see chain/ops.py's AbandonBeatOp) is a sibling WorldOp
+    # in the same batch — only top-level discriminated-union ops get real grammar-
+    # constrained-decoding benefit, a nested op-inside-a-JSON-column doesn't.

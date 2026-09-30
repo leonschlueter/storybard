@@ -49,7 +49,7 @@ class TestPlausibilityGenerate:
 
 class TestMechanicalCheckGenerate:
     async def test_valid_response(self, lm_client_with):
-        llm = lm_client_with({"roll_required": True, "skill": "persuasion", "dc": 15, "reason": "Uncertain."})
+        llm = lm_client_with({"roll_required": True, "skill": "cha", "dc": 15, "reason": "Uncertain."})
         result = await mechanical_check_generate(
             {"player_text": "I persuade the guard", "plausibility": {}}, llm=llm, model=MODEL
         )

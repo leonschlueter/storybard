@@ -45,4 +45,15 @@ class Campaign(Base):
 
     tone_state: Mapped[dict] = mapped_column(JSON, default=dict)
 
+    # Descriptive starting-calendar flavor ("early winter, three days before the harvest
+    # festival") generated from the campaign pitch — deliberately free text, not parsed
+    # into current_datetime (fragile for the value it'd add); same category as scene_text.
+    # Session-zero content (safety_tools, personal_stakes) captured during seeding, fed
+    # into opening_scene_prompt/narrator_prompt. All three nullable: pre-existing
+    # campaigns and campaigns with seed_session_zero/seed_calendar_from_pitch off won't
+    # have them. See the "All 20 Features" plan.
+    calendar_context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    safety_tools: Mapped[str | None] = mapped_column(Text, nullable=True)
+    personal_stakes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

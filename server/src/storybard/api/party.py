@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from storybard.core.db import get_db
 from storybard.domain.actor import CharacterSheet
+from storybard.domain.inventory import InventoryItem
+from storybard.domain.item import ItemDef
 from storybard.domain.ruleset import AncestryDef, AttributeDefinition, ClassDef
 from storybard.services.mechanics.formulas import POINT_BUY_POOL, ability_mod, point_buy_cost
 
@@ -126,6 +128,46 @@ async def _finalize_character(
     sheet.speed = ancestry.speed
     await db.flush()
     return sheet
+
+
+@router.get("/{campaign_id}/actors/{actor_id}/sheet")
+async def get_character_sheet(campaign_id: uuid.UUID, actor_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> dict:
+    """Feeds the frontend's character-sheet/status HUD (see the "Real Mechanical
+    Consequences" plan) — the ability scores/hp/ac/conditions/inventory a live-playing
+    character actually has right now, distinct from get_character_options (the pre-creation
+    catalog of what's available to choose from)."""
+    sheet = (
+        await db.execute(select(CharacterSheet).where(CharacterSheet.actor_id == actor_id))
+    ).scalar_one_or_none()
+    if not sheet:
+        raise HTTPException(status_code=404, detail="character sheet not found for this actor")
+
+    rows = (
+        await db.execute(
+            select(InventoryItem, ItemDef)
+            .join(ItemDef, ItemDef.id == InventoryItem.item_def_id)
+            .where(InventoryItem.owner_actor_id == actor_id)
+        )
+    ).all()
+
+    return {
+        "ancestry": sheet.ancestry,
+        "character_class": sheet.character_class,
+        "level": sheet.level,
+        "ability_scores": sheet.ability_scores,
+        "max_hp": sheet.max_hp,
+        "current_hp": sheet.current_hp,
+        "armor_class": sheet.armor_class,
+        "speed": sheet.speed,
+        "conditions": sheet.conditions,
+        "inventory": [
+            {
+                "item_def_id": str(item.id), "name": item.name, "item_type": item.item_type,
+                "quantity": inv.quantity, "equipped": inv.equipped,
+            }
+            for inv, item in rows
+        ],
+    }
 
 
 @router.post("/{campaign_id}/actors/{actor_id}/finalize-character", response_model=FinalizeCharacterOut)

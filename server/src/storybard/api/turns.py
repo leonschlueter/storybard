@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
+from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -10,14 +12,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from storybard.chain.graph import ChainRuntime
 from storybard.chain.ops import TickClockOp, apply_op
-from storybard.chain.prompts import opening_scene_prompt
-from storybard.chain.service import advance_turn, resolve_step
+from storybard.chain.prompts import npc_offscreen_prompt, opening_scene_prompt
+from storybard.chain.service import TurnSessionExpiredError, advance_turn, resolve_step
+from storybard.core.config import settings
 from storybard.core.db import get_db
 from storybard.core.ws_hub import ws_hub
 from storybard.domain.actor import Actor, ActorProfile, CharacterSheet
 from storybard.domain.campaign import Campaign
 from storybard.domain.chain_trace import ChainStep, TurnRun
 from storybard.domain.clock import Clock
+from storybard.domain.hook import Hook
 from storybard.domain.narrator import NarratorProfile
 from storybard.domain.thread import Thread
 from storybard.services.context_assembly import (
@@ -26,14 +30,19 @@ from storybard.services.context_assembly import (
     build_actor_context,
     build_known_actors,
     build_known_locations,
+    build_npc_impressions,
     build_recent_turns,
     build_recent_world_events,
     build_relevant_memories,
+    build_scene,
     build_scene_text,
+    campaign_settings_to_dict,
+    get_campaign_settings,
     project_active_threads,
     turns_since_thread_activity,
 )
-from storybard.services.llm.schemas import NarratorOut
+from storybard.services.llm.lmstudio_client import LMStudioError
+from storybard.services.llm.schemas import NarratorOut, NpcOffscreenOut
 
 router = APIRouter(tags=["turns"])
 
@@ -52,6 +61,25 @@ def _serialize_step(step: ChainStep) -> dict:
         "final_output": step.final_output,
         "status": step.status,
     }
+
+
+async def _get_in_flight_turn_run(db: AsyncSession, *, campaign_id: uuid.UUID, actor_id: uuid.UUID) -> TurnRun | None:
+    # most-recent-first + limit(1), not scalar_one_or_none(): create_turn's own guard below
+    # prevents more than one in-flight TurnRun going forward, but campaigns that predate
+    # the guard can have several (confirmed live — 3 orphaned rows on one actor) and this
+    # must not 500 against that pre-existing state.
+    return (
+        await db.execute(
+            select(TurnRun)
+            .where(
+                TurnRun.campaign_id == campaign_id,
+                TurnRun.actor_id == actor_id,
+                TurnRun.status.in_(["running", "paused"]),
+            )
+            .order_by(TurnRun.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
 
 
 class TurnCreateIn(BaseModel):
@@ -74,7 +102,33 @@ async def create_turn(
     if not actor:
         raise HTTPException(status_code=404, detail="actor_not_found")
 
-    scene_text = await build_scene_text(db, campaign_id=campaign_id, actor=actor)
+    # Nothing previously stopped a second turn from starting while an earlier one for the
+    # same actor was still running/paused on a pending review step — the earlier one just
+    # silently orphaned (its pending ChainStep sitting forever, never surfaced again).
+    # Confirmed live: a campaign audit found 3 such orphaned TurnRuns. Reject loudly
+    # instead — the client should resolve or abandon the in-flight turn first (see
+    # GET/.../current-turn and POST/.../current-turn/abandon below).
+    in_flight = await _get_in_flight_turn_run(db, campaign_id=campaign_id, actor_id=body.actor_id)
+    if in_flight:
+        raise HTTPException(status_code=409, detail="turn_in_progress")
+
+    # Everything below this point used to await ~10 independent reads strictly one after
+    # another. AsyncSession is not safe for concurrent use by multiple tasks, so the DB
+    # reads themselves can't be batched with asyncio.gather without risking a real
+    # concurrency bug (SQLAlchemy's own async docs are explicit about this) — but the
+    # embed() call is a separate HTTP round-trip to LM Studio that never touches `db` at
+    # all, so it's free to run concurrently with the first DB read instead of strictly
+    # after it.
+    async def _embed_player_text() -> list[float] | None:
+        try:
+            return await runtime.llm.embed(model=settings.LM_STUDIO_EMBED_MODEL, text=body.text)
+        except LMStudioError:
+            return None
+
+    scene_text, query_embedding = await asyncio.gather(
+        build_scene_text(db, campaign_id=campaign_id, actor=actor, calendar_context=campaign.calendar_context),
+        _embed_player_text(),
+    )
 
     style_description, verbosity_words = "Plain, direct, spoken-style.", 150.0
     if campaign.active_narrator_profile_id:
@@ -87,10 +141,18 @@ async def create_turn(
             style_description = narrator.style_description or style_description
             verbosity_words = narrator.verbosity_target_words
 
+    campaign_settings = await get_campaign_settings(db, campaign_id=campaign_id)
+    settings_dict = campaign_settings_to_dict(campaign_settings)
+
     active_threads_rows = await build_active_threads(db, campaign_id=campaign_id)
     active_threads = project_active_threads(active_threads_rows)
     active_clocks = await build_active_clocks(db, thread_ids=[t.id for t in active_threads_rows])
-    known_actors = await build_known_actors(db, campaign_id=campaign_id)
+    known_actors = await build_known_actors(
+        db, campaign_id=campaign_id, current_location_id=actor.current_node_id
+    )
+    if not campaign_settings.narration_npc_voices:
+        for entry in known_actors:
+            entry["personality"] = None
     known_locations = await build_known_locations(
         db, campaign_id=campaign_id, current_node_id=actor.current_node_id
     )
@@ -101,11 +163,29 @@ async def create_turn(
     sheet = (
         await db.execute(select(CharacterSheet).where(CharacterSheet.actor_id == actor.id))
     ).scalar_one_or_none()
-    actor_context = build_actor_context(actor, profile, sheet)
+    actor_context = build_actor_context(
+        actor, profile, sheet,
+        personal_stakes=campaign.personal_stakes if actor.kind == "player" else None,
+    )
     recent_turns = await build_recent_turns(db, campaign_id=campaign_id)
-    relevant_memories = await build_relevant_memories(db, owner_actor_id=actor.id)
+    # query_embedding computed concurrently with scene_text above (see comment there) —
+    # used here for a real similarity query, not a blind importance/recency sort (see
+    # build_relevant_memories's docstring).
+    relevant_memories = await build_relevant_memories(
+        db, owner_actor_id=actor.id, query_embedding=query_embedding
+    )
+    # Consequence ledger (feature #14): the data is always computed (a future GM-facing
+    # "what happened recently" panel can read it regardless), but only handed to the
+    # Narrator to weave in when the setting is on.
     recent_world_events = await build_recent_world_events(db, campaign_id=campaign_id)
+    narrator_world_events = recent_world_events if campaign_settings.narration_consequence_ledger else []
+    npc_impressions = (
+        await build_npc_impressions(db, campaign_id=campaign_id, subject_actor_id=actor.id)
+        if campaign_settings.narration_npc_memory
+        else []
+    )
     turns_idle = await turns_since_thread_activity(db, campaign_id=campaign_id)
+    scene = await build_scene(db, campaign_id=campaign_id, location_id=actor.current_node_id)
 
     turn_run = TurnRun(campaign_id=campaign.id, actor_id=actor.id, action_text=body.text)
     db.add(turn_run)
@@ -115,6 +195,7 @@ async def create_turn(
         "player_text": body.text,
         "mode": campaign.mode,
         "scene_text": scene_text,
+        "scene": scene,
         "style_description": style_description,
         "verbosity_words": verbosity_words,
         "active_threads": active_threads,
@@ -125,10 +206,13 @@ async def create_turn(
         "actor_context": actor_context,
         "recent_turns": recent_turns,
         "relevant_memories": relevant_memories,
-        "recent_world_events": recent_world_events,
+        "recent_world_events": narrator_world_events,
+        "npc_impressions": npc_impressions,
         "campaign_summary": campaign.summary or "",
         "turn_count": campaign.turn_count,
         "turns_since_thread_activity": turns_idle,
+        "campaign_settings": settings_dict,
+        "acting_actor_id": str(actor.id),
     }
 
     result = await advance_turn(runtime=runtime, db=db, turn_run=turn_run, resume_or_initial=initial_state)
@@ -156,7 +240,9 @@ async def _generate_opening_scene(
     if not actor:
         raise HTTPException(status_code=404, detail="actor_not_found")
 
-    scene_text = await build_scene_text(db, campaign_id=campaign.id, actor=actor)
+    scene_text = await build_scene_text(
+        db, campaign_id=campaign.id, actor=actor, calendar_context=campaign.calendar_context
+    )
     profile = (
         await db.execute(select(ActorProfile).where(ActorProfile.actor_id == actor.id))
     ).scalar_one_or_none()
@@ -165,7 +251,9 @@ async def _generate_opening_scene(
     ).scalar_one_or_none()
     actor_context = build_actor_context(actor, profile, sheet)
 
-    system, user = opening_scene_prompt(scene_text=scene_text, actor_context=actor_context)
+    system, user = opening_scene_prompt(
+        scene_text=scene_text, actor_context=actor_context, personal_stakes=campaign.personal_stakes
+    )
     out = await runtime.llm.structured_chat(
         model=runtime.model, system=system, user=user, output_model=NarratorOut
     )
@@ -195,6 +283,103 @@ async def opening_scene(
     return {"narration": narration}
 
 
+@router.get("/campaigns/{campaign_id}/actors/{actor_id}/scene")
+async def get_scene(campaign_id: uuid.UUID, actor_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> dict:
+    """Feeds the frontend's Scene & World rail — the same build_scene compiled object
+    ("who's here, which beats are due here") that's fed into the chain's prompts, now
+    also served to the client directly. See the "Frontend Redesign" plan."""
+    actor = (await db.execute(select(Actor).where(Actor.id == actor_id))).scalar_one_or_none()
+    if not actor:
+        raise HTTPException(status_code=404, detail="actor_not_found")
+    return await build_scene(db, campaign_id=campaign_id, location_id=actor.current_node_id)
+
+
+@router.get("/campaigns/{campaign_id}/actors/{actor_id}/turns")
+async def get_turn_history(campaign_id: uuid.UUID, actor_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> dict:
+    """The transcript was only ever populated live via the WebSocket stream — nothing
+    fetched past turns on load, so a page refresh silently lost the whole conversation
+    even though it was sitting in the database the entire time. Returns completed turns,
+    oldest first, in the same {player_text, narration} shape build_recent_turns already
+    uses for LLM context — reused here as the client-facing shape too.
+
+    Also returns each turn's chain steps (final_output per node) — previously only visible
+    live, during the same session, via the WebSocket stream; a refresh lost the entire
+    "what did each node actually decide" trail exactly the same way it used to lose the
+    transcript, even though ChainStep rows were sitting in the database the whole time."""
+    rows = (
+        await db.execute(
+            select(TurnRun)
+            .where(TurnRun.campaign_id == campaign_id, TurnRun.actor_id == actor_id, TurnRun.status == "completed")
+            .order_by(TurnRun.created_at)
+        )
+    ).scalars().all()
+    if not rows:
+        return {"turns": []}
+
+    steps_by_run: dict[uuid.UUID, list[ChainStep]] = {}
+    step_rows = (
+        await db.execute(
+            select(ChainStep)
+            .where(ChainStep.turn_run_id.in_([t.id for t in rows]))
+            .order_by(ChainStep.sequence)
+        )
+    ).scalars().all()
+    for s in step_rows:
+        steps_by_run.setdefault(s.turn_run_id, []).append(s)
+
+    return {
+        "turns": [
+            {
+                "id": str(t.id),
+                "player_text": t.action_text,
+                "narration": t.final_narration,
+                "steps": [
+                    {"node_type": s.node_type, "output": s.final_output or s.raw_output}
+                    for s in steps_by_run.get(t.id, [])
+                ],
+            }
+            for t in rows
+        ]
+    }
+
+
+@router.get("/campaigns/{campaign_id}/actors/{actor_id}/current-turn")
+async def get_current_turn(
+    campaign_id: uuid.UUID, actor_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+) -> dict | None:
+    """The in-flight turn create_turn's guard now blocks a second submission against —
+    lets the client recover a turn stuck on a pending review step after a refresh (it used
+    to just vanish from the UI, the underlying ChainStep still sitting there forever) by
+    resuming the exact same review flow a live WebSocket turn uses. Returns null when the
+    actor has nothing in flight."""
+    run = await _get_in_flight_turn_run(db, campaign_id=campaign_id, actor_id=actor_id)
+    if not run:
+        return None
+    steps = (
+        await db.execute(select(ChainStep).where(ChainStep.turn_run_id == run.id).order_by(ChainStep.sequence))
+    ).scalars().all()
+    return {
+        "turn_run_id": str(run.id),
+        "player_text": run.action_text,
+        "steps": [_serialize_step(s) for s in steps],
+    }
+
+
+@router.post("/campaigns/{campaign_id}/actors/{actor_id}/current-turn/abandon")
+async def abandon_current_turn(
+    campaign_id: uuid.UUID, actor_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+) -> dict:
+    """The explicit, non-silent way out of a turn the player doesn't want to finish
+    resolving — sets status to "abandoned" (excluded from both turn history and
+    create_turn's in-flight guard) rather than leaving it paused forever or deleting it."""
+    run = await _get_in_flight_turn_run(db, campaign_id=campaign_id, actor_id=actor_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="no_turn_in_progress")
+    run.status = "abandoned"
+    await db.commit()
+    return {"abandoned": True, "turn_run_id": str(run.id)}
+
+
 class StepResolveIn(BaseModel):
     action: str  # approve | edit | retry
     edited_output: dict | None = None
@@ -218,14 +403,21 @@ async def resolve_chain_step(
 
     turn_run = (await db.execute(select(TurnRun).where(TurnRun.id == step.turn_run_id))).scalar_one()
 
-    result = await resolve_step(
-        runtime=runtime,
-        db=db,
-        step=step,
-        turn_run=turn_run,
-        action=body.action,
-        edited_output=body.edited_output,
-    )
+    try:
+        result = await resolve_step(
+            runtime=runtime,
+            db=db,
+            step=step,
+            turn_run=turn_run,
+            action=body.action,
+            edited_output=body.edited_output,
+        )
+    except TurnSessionExpiredError:
+        # advance_turn already marked turn_run "abandoned" and flushed that change before
+        # raising — commit it so the client's next create_turn isn't blocked by the same
+        # in-flight guard this class of bug used to slip past silently.
+        await db.commit()
+        raise HTTPException(status_code=410, detail="turn_session_expired")
     await db.commit()
 
     payload = _turn_result_payload(result)
@@ -241,17 +433,28 @@ def _turn_result_payload(result: dict) -> dict:
 
 
 @router.post("/campaigns/{campaign_id}/world-tick")
-async def world_tick(campaign_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> dict:
+async def world_tick(
+    campaign_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    runtime: ChainRuntime = Depends(get_chain_runtime),
+) -> dict:
     """Manually-triggered per spec.md (real scheduling is Phase 5 platform scope) — but the
     segment math is now time-aware, not a flat +1: each time-elapsed clock advances by
     `elapsed_since_last_tick // real_time_per_segment` segments, so a three-week rest
     correctly fires several ticks on a fast clock and none on a slow one. See spec.md
     "What a tick actually is, now."
+
+    Also simulates NPC off-screen actions (feature #11): each NPC who owns an active
+    Thread gets one small LLM-generated beat when enough time has passed
+    (narration_npc_offscreen_interval_hours), appended as a clause to Campaign.summary —
+    reusing the rolling-summary plumbing every prompt that reads campaign_summary already
+    has, rather than threading a new context field through the whole chain.
     """
     campaign = (await db.execute(select(Campaign).where(Campaign.id == campaign_id))).scalar_one_or_none()
     if not campaign:
         raise HTTPException(status_code=404, detail="campaign_not_found")
 
+    campaign_settings = await get_campaign_settings(db, campaign_id=campaign_id)
     elapsed = campaign.current_datetime - campaign.last_world_tick_at
 
     active_thread_ids = (
@@ -281,6 +484,58 @@ async def world_tick(campaign_id: uuid.UUID, db: AsyncSession = Depends(get_db))
             result = await apply_op(db, campaign_id=campaign_id, op=op)
             ticked.append({"clock_id": str(clock.id), "applied": result.applied, "reason": result.reason})
 
+    offscreen_events: list[dict] = []
+    if campaign_settings.narration_npc_offscreen and elapsed >= timedelta(
+        hours=campaign_settings.narration_npc_offscreen_interval_hours
+    ):
+        npc_threads = (
+            await db.execute(
+                select(Thread).where(
+                    Thread.campaign_id == campaign_id, Thread.status == "active", Thread.owner_type == "actor"
+                )
+            )
+        ).scalars().all()
+        for thread in npc_threads:
+            if thread.owner_id is None:
+                continue
+            npc = (await db.execute(select(Actor).where(Actor.id == thread.owner_id))).scalar_one_or_none()
+            if npc is None:
+                continue
+            system, user = npc_offscreen_prompt(
+                npc_name=npc.name, npc_goal=npc.current_goal, thread_title=thread.title, thread_summary=thread.summary
+            )
+            out = await runtime.llm.structured_chat(
+                model=runtime.model, system=system, user=user, output_model=NpcOffscreenOut
+            )
+            campaign.summary = (campaign.summary + f"\n(While unwatched: {npc.name} — {out.event})").strip()
+            offscreen_events.append({"npc_actor_id": str(npc.id), "npc_name": npc.name, "event": out.event})
+
     campaign.last_world_tick_at = campaign.current_datetime
     await db.commit()
-    return {"ticked": ticked}
+    return {"ticked": ticked, "offscreen_events": offscreen_events}
+
+
+class HookResolveIn(BaseModel):
+    action: str  # accept | reject
+
+
+@router.post("/campaigns/{campaign_id}/hooks/{hook_id}/resolve")
+async def resolve_hook(
+    campaign_id: uuid.UUID, hook_id: uuid.UUID, body: HookResolveIn, db: AsyncSession = Depends(get_db)
+) -> dict:
+    """The missing half of Hook's design: `touches_entity_id` set means a hook
+    recontextualizes something already established and requires review before becoming
+    canon (see domain/hook.py) — but no endpoint ever let a human actually grant that
+    review, so every such hook sat in `status="proposed"` permanently. `origin="seed"`/
+    `"rumor"` hooks are auto-accepted at commit time and never need this; this only
+    matters for the `touches_entity_id`-bearing ones World Update proposes mid-play."""
+    hook = (
+        await db.execute(select(Hook).where(Hook.id == hook_id, Hook.campaign_id == campaign_id))
+    ).scalar_one_or_none()
+    if not hook:
+        raise HTTPException(status_code=404, detail="hook_not_found")
+    if body.action not in ("accept", "reject"):
+        raise HTTPException(status_code=400, detail="invalid_action")
+    hook.status = "accepted" if body.action == "accept" else "rejected"
+    await db.commit()
+    return {"id": str(hook.id), "status": hook.status}

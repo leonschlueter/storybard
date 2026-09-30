@@ -42,7 +42,12 @@ class PlausibilityOut(StrictOut):
 
 class MechanicalCheckOut(StrictOut):
     roll_required: bool
-    skill: str | None
+    # The governing ability, not a free-text skill name — this engine has never tracked
+    # skill-proficiency bonuses (CharacterSheet.proficiencies isn't consulted anywhere in
+    # mechanics), so resolving directly against the raw ability is an honest simplification
+    # matching the existing mechanical depth, not a new one. Lets services/mechanics/dice.py
+    # resolve a real roll without needing a skill->ability mapping table.
+    skill: Literal["str", "dex", "con", "int", "wis", "cha"] | None
     dc: int | None
     reason: str
 
@@ -87,14 +92,54 @@ class PlanSynthesisOut(StrictOut):
     plan: str
 
 
+class RollResolutionOut(BaseModel):
+    """NOT a StrictOut — this is never sent through grammar-constrained decoding, since
+    nothing calls an LLM to produce it (services/mechanics/dice.py::resolve_check computes
+    it deterministically). Kept here only so chain/service.py::NODE_OUTPUT_MODELS has one
+    place to look, matching every other node's output model, and so a human reviewing a
+    ChainStep can still "edit" it (override the rolled numbers) through the same generic
+    edit-validation path every other node uses."""
+
+    rolled: int
+    modifier: int
+    total: int
+    dc: int
+    ability: str
+    degree: Literal[
+        "critical_success", "clean_success", "narrow_success",
+        "narrow_failure", "clean_failure", "critical_failure",
+    ]
+
+
+class NpcOffscreenOut(StrictOut):
+    """One NPC's off-screen action while the player isn't watching (feature #11, "All 20
+    Features" plan) — /world-tick's NPC simulation call, see chain/prompts.py's
+    npc_offscreen_prompt."""
+
+    event: str
+
+
+class TwistOut(StrictOut):
+    """The Twist node's single output — a low-frequency complication injected separately
+    from Plan Synthesis's every-turn beat planning (feature #12, "All 20 Features" plan).
+    Only reached on a conditional edge (chain/graph.py's _route_after_plan_synthesis),
+    not every turn, so it can afford to be bolder than Plan Synthesis's routine pacing."""
+
+    complication: str
+
+
 class NarratorOut(StrictOut):
     narration: str
 
 
 class CampaignPitchOut(StrictOut):
-    """The Campaign Pitch quick-start's output target — field-for-field identical to
-    chain/seed_service.py's SeedInput, just StrictOut-compliant (no Python-level defaults,
-    since this is an LLM output target, not an API input with convenience defaults)."""
+    """The Campaign Pitch quick-start's output target — mirrors chain/seed_service.py's
+    original SeedInput fields plus calendar_context, StrictOut-compliant (no Python-level
+    defaults, since this is an LLM output target, not an API input with convenience
+    defaults). SeedInput's newer seeding-toggle fields (seed_npc_count, etc.) aren't asked
+    of the LLM here — those are wizard settings, not something a one-paragraph pitch
+    implies; generate_seed_input_from_pitch's SeedInput(**out.model_dump()) leaves them at
+    their normal defaults."""
 
     campaign_name: str
     world_name: str
@@ -104,3 +149,7 @@ class CampaignPitchOut(StrictOut):
     narrator_style_description: str
     player_actor_name: str
     must_include: list[str]
+    # Short descriptive starting-calendar flavor implied by the pitch (e.g. "early winter,
+    # three days before the harvest festival") — free text, not a real datetime parse; see
+    # SeedInput.calendar_context and Campaign.calendar_context.
+    calendar_context: str

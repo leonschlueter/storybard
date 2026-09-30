@@ -19,6 +19,15 @@ class Actor(Base):
     kind: Mapped[str] = mapped_column(String(20), default="npc")  # player | npc | companion
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # How this character actually talks — vocabulary, cadence, verbal tics (e.g. "clipped
+    # and formal, never uses contractions," "trails off mid-sentence, dock-worker slang").
+    # Distinct from ActorProfile.personality (only ever populated for the player character
+    # via Party Creation) and from bio (backstory, not voice) — NPCs had no field anywhere
+    # that actually carried how they sound, despite narrator_prompt instructing distinct
+    # per-NPC dialogue voices. Lives on Actor (not ActorProfile) since every NPC has an
+    # Actor row but not an ActorProfile one.
+    speech_style: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # A persistent one-line "what does this character want right now" note — set at
     # creation, updatable later via UpdateActorOp (chain/ops.py) so an NPC's motive stays
     # consistent across many turns instead of being reinvented from a static bio each time.
@@ -63,3 +72,8 @@ class CharacterSheet(Base):
     current_hp: Mapped[int] = mapped_column(Integer, default=10)
     armor_class: Mapped[int] = mapped_column(Integer, default=10)
     speed: Mapped[int] = mapped_column(Integer, default=30)
+
+    # Active status/condition tags (e.g. "shaken", "poisoned") — the concrete, persistent
+    # mechanical consequence a turn can leave on a character, applied/cleared via
+    # ApplyConditionOp (chain/ops.py). See the "Real Mechanical Consequences" plan.
+    conditions: Mapped[list] = mapped_column(JSON, default=list)

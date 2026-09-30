@@ -19,7 +19,7 @@ class TestOpeningSceneIdempotency:
         await db_session.flush()
 
         llm = lm_client_with({"narration": "You wake in a strange bed."})
-        runtime = ChainRuntime(graph=None, llm=llm, model=MODEL)
+        runtime = ChainRuntime(graph=None, llm=llm, model=MODEL, creative_model=MODEL)
 
         narration = await _generate_opening_scene(db_session, campaign=campaign, actor_id=actor.id, runtime=runtime)
 
@@ -41,7 +41,7 @@ class TestOpeningSceneIdempotency:
 
         llm = lm_client_with({"narration": "unused"})
         llm.structured_chat = fake_structured_chat
-        runtime = ChainRuntime(graph=None, llm=llm, model=MODEL)
+        runtime = ChainRuntime(graph=None, llm=llm, model=MODEL, creative_model=MODEL)
 
         narration = await _generate_opening_scene(db_session, campaign=campaign, actor_id=actor.id, runtime=runtime)
 

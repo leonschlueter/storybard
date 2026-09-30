@@ -21,6 +21,34 @@
 
   --color-teal-500: #2f8f82;
   --color-teal-400: #45ab9c;
+
+  /* Danger/failure/damage — the palette had nothing that read as "bad" distinctly from
+     ember's warm-orange brand color until the mechanical-consequences work (HP loss,
+     failed rolls, active conditions) needed one. */
+  --color-crimson-500: #b3394a;
+  --color-crimson-400: #d24f61;
+  --color-crimson-300: #e37f8c;
+
+  /* Elevation scale — Tailwind's default shadow-* utilities are tuned for light
+     backgrounds (barely visible on near-black); these override them so `shadow-sm/md/lg`
+     read correctly against the ink palette. Subtle (Linear/Notion-style), not heavy
+     drop-shadows. */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.35);
+  --shadow-md: 0 4px 16px -4px rgb(0 0 0 / 0.45), 0 2px 6px -2px rgb(0 0 0 / 0.35);
+  --shadow-lg: 0 16px 40px -12px rgb(0 0 0 / 0.55), 0 4px 12px -4px rgb(0 0 0 / 0.4);
+
+  --animate-fade-in-up: fade-in-up 0.25s ease-out;
+
+  @keyframes fade-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
 }
 
 html {
@@ -29,7 +57,13 @@ html {
 
 body {
   margin: 0;
-  background: var(--color-ink-950);
+  /* A faint warm glow from the top of the viewport — atmosphere without hurting
+     readability, the one deliberate "dark fantasy" touch on top of an otherwise clean
+     modern-SaaS surface. */
+  background:
+    radial-gradient(ellipse 90% 45% at 50% -10%, rgb(201 114 42 / 0.09), transparent 70%),
+    var(--color-ink-950);
+  background-attachment: fixed;
   color: var(--color-ink-100);
   font-family: var(--font-sans);
 }

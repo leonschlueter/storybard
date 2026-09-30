@@ -4,12 +4,12 @@ import uuid
 from dataclasses import dataclass
 from typing import Annotated, Literal, Union
 
-from pydantic import Field, TypeAdapter
+from pydantic import Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from storybard.core.config import settings
-from storybard.domain.actor import Actor
+from storybard.domain.actor import Actor, CharacterSheet
 from storybard.domain.clock import Clock
 from storybard.domain.faction import Faction
 from storybard.domain.hook import Hook
@@ -17,9 +17,19 @@ from storybard.domain.item import ItemDef
 from storybard.domain.ruleset import AncestryDef, ClassDef
 from storybard.domain.spell import SpellDef
 from storybard.domain.thread import MAX_THREAD_DEPTH, Thread
+from storybard.domain.thread_beat import ThreadBeat
 from storybard.domain.world import WorldNode
 from storybard.services.duration import parse_duration
 from storybard.services.llm.schemas import StrictOut
+
+
+class BeatSpec(StrictOut):
+    """A planned step in a thread's progression, staged at thread-creation time — see
+    domain/thread_beat.py::ThreadBeat. Not a top-level discriminated op itself; nested
+    inside CreateMajorThreadOp/CreateMinorThreadOp's initial_beats."""
+
+    description: str
+    location_id: str | None
 
 
 class CreateMajorThreadOp(StrictOut):
@@ -28,6 +38,10 @@ class CreateMajorThreadOp(StrictOut):
     summary: str
     owner_type: Literal["campaign", "actor", "faction"]
     owner_id: str | None
+    # 2-4 concrete planned steps when the thread has enough shape to warrant staging one —
+    # an empty list is fine and expected for a thread that's still just a premise. See
+    # ThreadBeat's docstring for why abandonment doesn't carry a nested consequence field.
+    initial_beats: list[BeatSpec]
 
 
 class CreateMinorThreadOp(StrictOut):
@@ -36,6 +50,7 @@ class CreateMinorThreadOp(StrictOut):
     relation: Literal["prerequisite", "alternative", "optional_aid"]
     title: str
     summary: str
+    initial_beats: list[BeatSpec]
 
 
 class AddClockOp(StrictOut):
@@ -83,6 +98,12 @@ class CreateActorOp(StrictOut):
     # playable consistently across many future turns instead of a motive reinvented from
     # bio each time. Null is fine if the narration didn't establish anything specific yet.
     current_goal: str | None
+    # How this character actually talks (vocabulary, cadence, verbal tics) — the field
+    # narrator_prompt actually needs to render a distinct dialogue voice. bio is backstory,
+    # not voice; ActorProfile.personality is player-only. Without this, every NPC's
+    # "personality" in known_actors was structurally always null. Null is fine if the
+    # character isn't expected to speak.
+    speech_style: str | None
 
 
 class CreateWorldNodeOp(StrictOut):
@@ -157,6 +178,57 @@ class UpdateActorOp(StrictOut):
     actor_id: str
     current_goal: str | None
     bio: str | None
+    # Lets an NPC's voice be established later if create_actor left it null, or refined
+    # once they've actually spoken on-screen. Null leaves the existing value unchanged,
+    # same convention as current_goal/bio above.
+    speech_style: str | None
+
+
+class ApplyDamageOp(StrictOut):
+    """The concrete mechanical consequence a real roll's failure (or any narrative danger)
+    can leave on a character — previously nothing in the ops vocabulary could touch
+    CharacterSheet.current_hp at all. amount is positive to damage, negative to heal;
+    _apply_damage clamps to [0, max_hp] rather than trusting the LLM's arithmetic. See the
+    "Real Mechanical Consequences" plan."""
+
+    op: Literal["apply_damage"]
+    actor_id: str
+    amount: int
+    reason: str
+
+
+class ApplyConditionOp(StrictOut):
+    """Adds or removes a status tag (e.g. "shaken", "poisoned") from CharacterSheet.
+    conditions — the persistent counterpart to ApplyDamageOp for consequences that aren't
+    HP loss. active=True adds (deduped), active=False removes."""
+
+    op: Literal["apply_condition"]
+    actor_id: str
+    condition: str
+    active: bool
+    note: str | None
+
+
+class FireBeatOp(StrictOut):
+    """Marks a ThreadBeat as delivered — the GM decided this planned step is happening
+    now. Purely a state transition; the actual narrative content comes from the Narrator
+    having been told about the beat via services/context_assembly.py::build_scene."""
+
+    op: Literal["fire_beat"]
+    beat_id: str
+    reason: str
+
+
+class AbandonBeatOp(StrictOut):
+    """Marks a ThreadBeat as skipped rather than silently forgotten — a real, code-tracked
+    event instead of decay nothing ever notices. If a real consequence is warranted, pair
+    this with a sibling op in the same World Update batch (propose_hook, apply_condition,
+    tick_clock, ...) rather than a nested consequence field — see ThreadBeat's docstring
+    for why."""
+
+    op: Literal["abandon_beat"]
+    beat_id: str
+    reason: str
 
 
 WorldOp = Annotated[
@@ -174,6 +246,10 @@ WorldOp = Annotated[
         CreateFactionOp,
         CreateAncestryDefOp,
         CreateClassDefOp,
+        ApplyDamageOp,
+        ApplyConditionOp,
+        FireBeatOp,
+        AbandonBeatOp,
     ],
     Field(discriminator="op"),
 ]
@@ -183,14 +259,19 @@ class WorldUpdateOut(StrictOut):
     ops: list[WorldOp]
 
 
-# A strict subset of WorldOp used only for Campaign Seeding's content-generation LLM call
-# (chain/seed_service.py) — per spec.md design principle #2, grammar-constrained decoding
-# only enforces what the JSON schema itself forbids, so keeping the model from proposing
-# e.g. create_actor or tick_clock during seeding needs a narrower schema, not just prompt
-# wording. Every SeedOp member validates as a WorldOp too (same discriminators, same
-# fields), so the existing apply_op/apply_world_update_ops machinery applies unchanged.
+# A strict subset of WorldOp used only for Campaign Seeding's mechanical content-generation
+# LLM call (chain/seed_service.py's seed_content_prompt: races/classes/items/spells) — per
+# spec.md design principle #2, grammar-constrained decoding only enforces what the JSON
+# schema itself forbids, so keeping the model from proposing e.g. create_actor or
+# tick_clock during seeding needs a narrower schema, not just prompt wording. Every SeedOp
+# member validates as a WorldOp too (same discriminators, same fields), so the existing
+# apply_op/apply_world_update_ops machinery applies unchanged.
+#
+# CreateFactionOp deliberately isn't here: faction seeding moved to the always-on
+# seed_narrative_prompt call (SeedNarrativeOp below) so a standard_5e campaign gets a
+# background faction too, not just "generate" mode (feature #6, "All 20 Features" plan).
 SeedOp = Annotated[
-    Union[CreateAncestryDefOp, CreateClassDefOp, CreateItemDefOp, CreateSpellDefOp, CreateFactionOp],
+    Union[CreateAncestryDefOp, CreateClassDefOp, CreateItemDefOp, CreateSpellDefOp],
     Field(discriminator="op"),
 ]
 
@@ -199,10 +280,61 @@ class SeedContentOut(StrictOut):
     ops: list[SeedOp]
 
 
+# A second narrow subset, used only for Campaign Seeding's *narrative* content call
+# (chain/seed_service.py's seed_narrative_prompt) — NPCs, Hooks/Rumors, a background
+# Faction, (when seed_location_depth >= 2) child locations, and one elaborated major
+# thread per must-include wish. Deliberately separate from SeedOp (mechanical content:
+# ancestries/classes/items/spells) — narrative and mechanical seeding are different
+# judgment calls, made in different LLM calls, so a schema mixing them would let one leak
+# into the other's slot. Always called regardless of races_classes_mode, unlike SeedOp
+# (per the "All 20 Features" plan, feature #1).
+#
+# CreateMajorThreadOp is here specifically so must-include wishes get elaborated (real
+# title/summary/initial_beats) by this LLM call instead of being copied verbatim — see
+# chain/seed_service.py's propose_seed, which used to construct these directly in Python
+# (title=wish, summary=wish, no beats) and has since stopped, per direct user feedback
+# that the resulting threads were flat and un-elaborated.
+SeedNarrativeOp = Annotated[
+    Union[CreateActorOp, ProposeHookOp, CreateFactionOp, CreateWorldNodeOp, CreateMajorThreadOp],
+    Field(discriminator="op"),
+]
+
+
+class SeedNarrativeOut(StrictOut):
+    """ops's create_world_node entries (when present) reference their parent by the
+    parent location's plain NAME in parent_node_id, not a real id — at generation time no
+    location has a real id yet. chain/seed_service.py's commit_seed resolves these names
+    against already-applied locations as it applies them in order, a resolution scoped to
+    seeding only (apply_op's general contract elsewhere is unchanged: always a real id).
+    Same reasoning for create_actor's current_node_id: the root location's name is a valid
+    placeholder there too.
+
+    planted_reveal is a single GM-only hidden connection (chain/seed_service.py stores it
+    as a PlantedReveal row, never fed to the player) — deliberately not part of the ops
+    vocabulary since it isn't a piece of persistent *world* state apply_op gates, the same
+    reasoning CreateMemoryOut's docstring gives for keeping Memory separate. Null when
+    seed_planted_reveal is off.
+    """
+
+    ops: list[SeedNarrativeOp]
+    planted_reveal: str | None
+
+
 class MemoryEntry(StrictOut):
     title: str | None
     text: str
     importance: int
+
+
+class NpcImpression(StrictOut):
+    """A one-line "what does this NPC now think of the player" note — the NPC-owned
+    counterpart to the player-owned MemoryEntry above (feature #19, "All 20 Features"
+    plan). npc_actor_id must resolve to a real, campaign-scoped Actor of kind "npc"/
+    "companion" or the impression is silently skipped (never a fabricated actor id
+    trusted into the database) — see chain/service.py::_apply_memory_regression."""
+
+    npc_actor_id: str
+    text: str
 
 
 class CreateMemoryOut(StrictOut):
@@ -215,10 +347,15 @@ class CreateMemoryOut(StrictOut):
     Memory Regression already runs last and already sees the full narration — the exact
     input a rolling "where does the story stand now" summary needs, so reusing the node
     that has that context avoids inventing a new one that would need the same wiring.
+
+    npc_impressions similarly rides along here rather than a dedicated node — same
+    reasoning, plus these are Memory rows too (just with owner/subject swapped), so the
+    same node that already writes Memory writes these.
     """
 
     memories: list[MemoryEntry]
     campaign_summary_update: str
+    npc_impressions: list[NpcImpression]
 
 
 @dataclass
@@ -266,7 +403,41 @@ async def apply_op(db: AsyncSession, *, campaign_id: uuid.UUID, op: WorldOp) -> 
         return await _create_ancestry_def(db, campaign_id=campaign_id, op=op)
     if isinstance(op, CreateClassDefOp):
         return await _create_class_def(db, campaign_id=campaign_id, op=op)
+    if isinstance(op, ApplyDamageOp):
+        return await _apply_damage(db, campaign_id=campaign_id, op=op)
+    if isinstance(op, ApplyConditionOp):
+        return await _apply_condition(db, campaign_id=campaign_id, op=op)
+    if isinstance(op, FireBeatOp):
+        return await _fire_beat(db, campaign_id=campaign_id, op=op)
+    if isinstance(op, AbandonBeatOp):
+        return await _abandon_beat(db, campaign_id=campaign_id, op=op)
     return AppliedOpResult(applied=False, reason=f"unknown op type: {op!r}")
+
+
+async def _create_beats(
+    db: AsyncSession, *, campaign_id: uuid.UUID, thread_id: uuid.UUID, beats: list[BeatSpec]
+) -> None:
+    """Creates the ThreadBeat rows staged alongside a new thread. A malformed or
+    unresolvable location_id on one beat drops *that beat's* location link (falls back to
+    "applies anywhere") rather than failing the whole thread-creation op — one bad
+    reference in a list of several beats shouldn't sink the entire thread."""
+    for i, beat in enumerate(beats):
+        location_id: uuid.UUID | None = None
+        if beat.location_id:
+            parsed, err = _parse_uuid(beat.location_id, "location_id")
+            if not err:
+                node = (
+                    await db.execute(
+                        select(WorldNode).where(WorldNode.id == parsed, WorldNode.campaign_id == campaign_id)
+                    )
+                ).scalar_one_or_none()
+                if node:
+                    location_id = parsed
+        db.add(
+            ThreadBeat(thread_id=thread_id, order_index=i, description=beat.description, location_id=location_id)
+        )
+    if beats:
+        await db.flush()
 
 
 async def _create_major_thread(db: AsyncSession, *, campaign_id: uuid.UUID, op: CreateMajorThreadOp) -> AppliedOpResult:
@@ -301,6 +472,7 @@ async def _create_major_thread(db: AsyncSession, *, campaign_id: uuid.UUID, op: 
     )
     db.add(thread)
     await db.flush()
+    await _create_beats(db, campaign_id=campaign_id, thread_id=thread.id, beats=op.initial_beats)
     return AppliedOpResult(applied=True, reason="created", entity_id=thread.id)
 
 
@@ -348,6 +520,7 @@ async def _create_minor_thread(db: AsyncSession, *, campaign_id: uuid.UUID, op: 
     )
     db.add(thread)
     await db.flush()
+    await _create_beats(db, campaign_id=campaign_id, thread_id=thread.id, beats=op.initial_beats)
     return AppliedOpResult(applied=True, reason="created", entity_id=thread.id)
 
 
@@ -393,11 +566,6 @@ async def _tick_clock(db: AsyncSession, *, campaign_id: uuid.UUID, op: TickClock
     clock.segments_filled = min(clock.segments_total, max(0, clock.segments_filled + op.segments_delta))
     await db.flush()
 
-    if clock.segments_filled >= clock.segments_total and clock.consequence_op:
-        consequence = _parse_op(clock.consequence_op)
-        if consequence:
-            await apply_op(db, campaign_id=campaign_id, op=consequence)
-
     return AppliedOpResult(applied=True, reason="ticked", entity_id=clock.id)
 
 
@@ -432,7 +600,7 @@ async def _create_actor(db: AsyncSession, *, campaign_id: uuid.UUID, op: CreateA
 
     actor = Actor(
         campaign_id=campaign_id, name=op.name, kind=op.kind, bio=op.bio, current_node_id=current_node_id,
-        current_goal=op.current_goal,
+        current_goal=op.current_goal, speech_style=op.speech_style,
     )
     db.add(actor)
     await db.flush()
@@ -454,6 +622,8 @@ async def _update_actor(db: AsyncSession, *, campaign_id: uuid.UUID, op: UpdateA
         actor.current_goal = op.current_goal
     if op.bio is not None:
         actor.bio = op.bio
+    if op.speech_style is not None:
+        actor.speech_style = op.speech_style
     await db.flush()
     return AppliedOpResult(applied=True, reason="updated", entity_id=actor.id)
 
@@ -560,8 +730,78 @@ async def _create_class_def(db: AsyncSession, *, campaign_id: uuid.UUID, op: Cre
     return AppliedOpResult(applied=True, reason="created", entity_id=class_def.id)
 
 
-def _parse_op(raw: dict) -> WorldOp | None:
-    try:
-        return TypeAdapter(WorldOp).validate_python(raw)
-    except Exception:
-        return None
+async def _get_actor_and_sheet(
+    db: AsyncSession, *, campaign_id: uuid.UUID, actor_id_raw: str
+) -> tuple[Actor | None, CharacterSheet | None, str | None]:
+    actor_id, err = _parse_uuid(actor_id_raw, "actor_id")
+    if err:
+        return None, None, err
+    actor = (
+        await db.execute(select(Actor).where(Actor.id == actor_id, Actor.campaign_id == campaign_id))
+    ).scalar_one_or_none()
+    if not actor:
+        return None, None, f"actor {actor_id} not found"
+    sheet = (await db.execute(select(CharacterSheet).where(CharacterSheet.actor_id == actor.id))).scalar_one_or_none()
+    if not sheet:
+        return actor, None, f"actor {actor_id} has no character sheet"
+    return actor, sheet, None
+
+
+async def _apply_damage(db: AsyncSession, *, campaign_id: uuid.UUID, op: ApplyDamageOp) -> AppliedOpResult:
+    actor, sheet, err = await _get_actor_and_sheet(db, campaign_id=campaign_id, actor_id_raw=op.actor_id)
+    if err:
+        return AppliedOpResult(applied=False, reason=err)
+    sheet.current_hp = max(0, min(sheet.max_hp, sheet.current_hp - op.amount))
+    await db.flush()
+    return AppliedOpResult(applied=True, reason=f"current_hp -> {sheet.current_hp}", entity_id=actor.id)
+
+
+async def _apply_condition(db: AsyncSession, *, campaign_id: uuid.UUID, op: ApplyConditionOp) -> AppliedOpResult:
+    actor, sheet, err = await _get_actor_and_sheet(db, campaign_id=campaign_id, actor_id_raw=op.actor_id)
+    if err:
+        return AppliedOpResult(applied=False, reason=err)
+    conditions = list(sheet.conditions or [])
+    if op.active:
+        if op.condition not in conditions:
+            conditions.append(op.condition)
+    else:
+        conditions = [c for c in conditions if c != op.condition]
+    sheet.conditions = conditions
+    await db.flush()
+    return AppliedOpResult(applied=True, reason=f"conditions -> {conditions}", entity_id=actor.id)
+
+
+async def _get_beat(
+    db: AsyncSession, *, campaign_id: uuid.UUID, beat_id_raw: str
+) -> tuple[ThreadBeat | None, str | None]:
+    beat_id, err = _parse_uuid(beat_id_raw, "beat_id")
+    if err:
+        return None, err
+    beat = (
+        await db.execute(
+            select(ThreadBeat)
+            .join(Thread, Thread.id == ThreadBeat.thread_id)
+            .where(ThreadBeat.id == beat_id, Thread.campaign_id == campaign_id)
+        )
+    ).scalar_one_or_none()
+    if not beat:
+        return None, f"beat {beat_id} not found"
+    return beat, None
+
+
+async def _fire_beat(db: AsyncSession, *, campaign_id: uuid.UUID, op: FireBeatOp) -> AppliedOpResult:
+    beat, err = await _get_beat(db, campaign_id=campaign_id, beat_id_raw=op.beat_id)
+    if err:
+        return AppliedOpResult(applied=False, reason=err)
+    beat.status = "fired"
+    await db.flush()
+    return AppliedOpResult(applied=True, reason="fired", entity_id=beat.id)
+
+
+async def _abandon_beat(db: AsyncSession, *, campaign_id: uuid.UUID, op: AbandonBeatOp) -> AppliedOpResult:
+    beat, err = await _get_beat(db, campaign_id=campaign_id, beat_id_raw=op.beat_id)
+    if err:
+        return AppliedOpResult(applied=False, reason=err)
+    beat.status = "abandoned"
+    await db.flush()
+    return AppliedOpResult(applied=True, reason="abandoned", entity_id=beat.id)
